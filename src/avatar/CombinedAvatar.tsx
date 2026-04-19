@@ -344,75 +344,66 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
       className={className}
       style={{ display: "block", background: colors.background, overflow: "visible" }}
     >
-      {/* Glow filter removed — re-add a <filter> + filter=url(...) on the
-           group below if you want to restore the amber drop-shadow. */}
-      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
-        {/* ---- 1. Source artwork backdrop ---- */}
-        {/* face fill (no stroke) */}
-        <path d={B.faceFill} fill={colors.skin} />
-        {/* face fill + outline */}
-        <path
-          d={B.faceOutline}
-          fill={colors.skin}
-          stroke={colors.ink}
-          strokeWidth={6}
-          strokeLinecap="round"
-        />
-        {/* hair */}
-        <path d={B.hair} fill={colors.ink} />
-        {/* beard main + accent */}
-        <path d={B.beardMain} fill={colors.ink} />
-        <path d={B.beardAccent} fill={colors.ink} />
-        {/* ear (fill + outline + inner whorl) */}
-        <path d={B.earFill} fill={colors.skin} />
-        <path
-          d={B.earOutline}
-          fill="none"
-          stroke={colors.ink}
-          strokeWidth={6}
-          strokeLinecap="round"
-        />
-        <path
-          d={B.earInner}
-          fill="none"
-          stroke={colors.black}
-          strokeWidth={6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {/* glasses compound shape */}
-        <path d={B.glasses} fill={colors.black} fillRule="evenodd" clipRule="evenodd" />
-        {/* hinge dots */}
-        <ellipse cx={B.hingeLeft.cx} cy={B.hingeLeft.cy} rx={B.hingeLeft.rx} ry={B.hingeLeft.ry} fill={colors.hingeGray} />
-        <ellipse cx={B.hingeRight.cx} cy={B.hingeRight.cy} rx={B.hingeRight.rx} ry={B.hingeRight.ry} fill={colors.hingeGray} />
-        {/* nose */}
-        <path d={B.noseFill} fill={colors.skin} />
-        <path
-          d={B.noseOutline}
-          fill="none"
-          stroke={colors.black}
-          strokeWidth={4}
-          strokeLinecap="round"
-        />
+      {/*
+        Explicit paint order requested:
 
-        {/* ---- 2. Erasers wiping baked-in pupils / mouth ---- */}
+          head → hair → ear → eye R → eye L → brow R → brow L →
+          glasses → nose → mouth → beard → mustache
+
+        In SVG, source order = paint order (earlier = drawn first,
+        underneath). So we render from the bottom of the stack (head)
+        to the top (mustache = beardAccent).
+
+        NOTE: because `beard` and `mustache` render AFTER `mouth`, the
+        animated mouth will be visually covered wherever the beard path
+        overlaps the mouth region. If you want the mouth to read on top
+        of the beard, swap the mouth and beard blocks.
+      */}
+      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
+        {/* ---- head (face fill + outline) ---- */}
+        <g id="head">
+          <path d={B.faceFill} fill={colors.skin} />
+          <path
+            d={B.faceOutline}
+            fill={colors.skin}
+            stroke={colors.ink}
+            strokeWidth={6}
+            strokeLinecap="round"
+          />
+        </g>
+
+        {/* ---- hair ---- */}
+        <g id="hair">
+          <path d={B.hair} fill={colors.ink} />
+        </g>
+
+        {/* ---- ear ---- */}
+        <g id="ear">
+          <path d={B.earFill} fill={colors.skin} />
+          <path
+            d={B.earOutline}
+            fill="none"
+            stroke={colors.ink}
+            strokeWidth={6}
+            strokeLinecap="round"
+          />
+          <path
+            d={B.earInner}
+            fill="none"
+            stroke={colors.black}
+            strokeWidth={6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+
+        {/* Skin-colored erasers for the lens interiors so animated pupils
+            sit on clean skin rather than any baked-in geometry. */}
         <ellipse cx={E.lensL.cx} cy={E.lensL.cy} rx={E.lensL.rx} ry={E.lensL.ry} fill={colors.skin} />
         <ellipse cx={E.lensR.cx} cy={E.lensR.cy} rx={E.lensR.rx} ry={E.lensR.ry} fill={colors.skin} />
-        <ellipse cx={E.mouth.cx} cy={E.mouth.cy} rx={E.mouth.rx} ry={E.mouth.ry} fill={colors.skin} />
 
-        {/* ---- 3. Animated pupils + catch-lights ---- */}
-        <g>
-          {/* Animated pupils draw DIRECTLY (no eye-white behind them) so
-              they read like the source pupils sitting on skin inside the
-              glasses' black lens beds. */}
-          <ellipse
-            cx={eL.cx + pupilDX}
-            cy={eL.cy + pupilDY}
-            rx={PUPIL_RX}
-            ry={pupRyL}
-            fill={colors.pupil}
-            opacity={pupVisL}
-          />
+        {/* ---- eye R (viewer-right / far-side) ---- */}
+        <g id="eye-right">
           <ellipse
             cx={eR.cx + pupilDX}
             cy={eR.cy + pupilDY}
@@ -420,16 +411,6 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
             ry={pupRyR}
             fill={colors.pupil}
             opacity={pupVisR}
-          />
-          {/* Catch-lights — peach-toned like the source (cx=80.75/125.75,
-              cy=144.543 in source → offset ~(-4, +3) from pupil center) */}
-          <ellipse
-            cx={eL.cx + pupilDX - 4}
-            cy={eL.cy + pupilDY + 3}
-            rx={CATCH_RX}
-            ry={CATCH_RY}
-            fill={colors.catchLight}
-            opacity={pupVisL}
           />
           <ellipse
             cx={eR.cx + pupilDX - 4}
@@ -439,37 +420,81 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
             fill={colors.catchLight}
             opacity={pupVisR}
           />
+          {effective.lidOpenR < 0.98 && (
+            <ellipse
+              cx={eR.cx}
+              cy={eR.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenR))}
+              rx={EYE_RX + 1.5}
+              ry={EYE_RY * (1 - clamp01(effective.lidOpenR))}
+              fill={colors.skin}
+            />
+          )}
         </g>
 
-        {/* ---- 4. Eye lid (skin-colored) when blink is partial so it
-                    squashes the pupil from above cleanly ---- */}
-        {effective.lidOpenL < 0.98 && (
+        {/* ---- eye L (viewer-left / near-side) ---- */}
+        <g id="eye-left">
           <ellipse
-            cx={eL.cx}
-            cy={eL.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenL))}
-            rx={EYE_RX + 1.5}
-            ry={EYE_RY * (1 - clamp01(effective.lidOpenL))}
-            fill={colors.skin}
+            cx={eL.cx + pupilDX}
+            cy={eL.cy + pupilDY}
+            rx={PUPIL_RX}
+            ry={pupRyL}
+            fill={colors.pupil}
+            opacity={pupVisL}
           />
-        )}
-        {effective.lidOpenR < 0.98 && (
           <ellipse
-            cx={eR.cx}
-            cy={eR.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenR))}
-            rx={EYE_RX + 1.5}
-            ry={EYE_RY * (1 - clamp01(effective.lidOpenR))}
-            fill={colors.skin}
+            cx={eL.cx + pupilDX - 4}
+            cy={eL.cy + pupilDY + 3}
+            rx={CATCH_RX}
+            ry={CATCH_RY}
+            fill={colors.catchLight}
+            opacity={pupVisL}
           />
-        )}
+          {effective.lidOpenL < 0.98 && (
+            <ellipse
+              cx={eL.cx}
+              cy={eL.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenL))}
+              rx={EYE_RX + 1.5}
+              ry={EYE_RY * (1 - clamp01(effective.lidOpenL))}
+              fill={colors.skin}
+            />
+          )}
+        </g>
 
-        {/* ---- 5. Animated brows (chunky brown bars) ---- */}
-        <g fill={colors.ink} stroke="none">
-          <path d={browDL} />
+        {/* ---- brow R ---- */}
+        <g id="brow-right" fill={colors.ink} stroke="none">
           <path d={browDR} />
         </g>
 
-        {/* ---- 6. Animated mouth ---- */}
-        <g transform={`translate(${mouthShift.dx} ${mouthShift.dy})`}>
+        {/* ---- brow L ---- */}
+        <g id="brow-left" fill={colors.ink} stroke="none">
+          <path d={browDL} />
+        </g>
+
+        {/* ---- glasses (frame compound + hinge dots) ---- */}
+        <g id="glasses">
+          <path d={B.glasses} fill={colors.black} fillRule="evenodd" clipRule="evenodd" />
+          <ellipse cx={B.hingeLeft.cx} cy={B.hingeLeft.cy} rx={B.hingeLeft.rx} ry={B.hingeLeft.ry} fill={colors.hingeGray} />
+          <ellipse cx={B.hingeRight.cx} cy={B.hingeRight.cy} rx={B.hingeRight.rx} ry={B.hingeRight.ry} fill={colors.hingeGray} />
+        </g>
+
+        {/* ---- nose ---- */}
+        <g id="nose">
+          <path d={B.noseFill} fill={colors.skin} />
+          <path
+            d={B.noseOutline}
+            fill="none"
+            stroke={colors.black}
+            strokeWidth={4}
+            strokeLinecap="round"
+          />
+        </g>
+
+        {/* Eraser for the mouth region so the animated mouth sits on
+            clean skin (in case any source detail leaks through). */}
+        <ellipse cx={E.mouth.cx} cy={E.mouth.cy} rx={E.mouth.rx} ry={E.mouth.ry} fill={colors.skin} />
+
+        {/* ---- mouth ---- */}
+        <g id="mouth" transform={`translate(${mouthShift.dx} ${mouthShift.dy})`}>
           <path
             d={mouthD}
             fill={mouthFillColor}
@@ -478,6 +503,16 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        </g>
+
+        {/* ---- beard ---- */}
+        <g id="beard">
+          <path d={B.beardMain} fill={colors.ink} />
+        </g>
+
+        {/* ---- mustache ---- */}
+        <g id="mustache">
+          <path d={B.beardAccent} fill={colors.ink} />
         </g>
       </g>
     </svg>
