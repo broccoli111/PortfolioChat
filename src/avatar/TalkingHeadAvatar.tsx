@@ -1,0 +1,546 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AvatarEmotion, AvatarMouthShape, AvatarPalette, AvatarState } from "./types";
+import {
+  EXPRESSION_PRESETS,
+  blendParams,
+  clamp,
+  clamp01,
+  lerp,
+  neutralParams,
+  type ExpressionParams,
+} from "./expressions";
+import {
+  GEOMETRY,
+  VIEWBOX,
+  beardPath,
+  browPath,
+  earPath,
+  hairHighlightPath,
+  hairMainPath,
+  headSilhouettePath,
+  mouthPath,
+  mustachePath,
+} from "./geometry";
+import { resolvePalette } from "./palette";
+
+export type TalkingHeadAvatarProps = AvatarState & {
+  /** Optional palette overrides. Only the fields you supply are overridden. */
+  palette?: AvatarPalette;
+  /** Optional className on the root <svg>. */
+  className?: string;
+  /** Accessible label read by screen readers. */
+  ariaLabel?: string;
+};
+
+// ---------- Animation tuning ----------------------------------------------
+
+/** How fast the live parameter vector chases the target. Per-second factor. */
+const EXPRESSION_EASE = 6;
+/** Idle bob parameters. */
+const IDLE_BOB_AMPLITUDE = 1.5;   // pixels
+const IDLE_BOB_PERIOD_MS = 3600;
+/** Blink timing. */
+const BLINK_MIN_INTERVAL_MS = 2000;
+const BLINK_MAX_INTERVAL_MS = 5000;
+const BLINK_CLOSE_MS = 90;
+const BLINK_OPEN_MS = 130;
+/** Speaking mouth cycle (ms between shape changes). */
+const SPEAK_STEP_MIN_MS = 70;
+const SPEAK_STEP_MAX_MS = 160;
+/** Idle pupil drift. */
+const IDLE_DRIFT_AMPLITUDE = 0.8; // within eye, pixels
+const IDLE_DRIFT_PERIOD_MS = 5200;
+
+// ---------- Helpers -------------------------------------------------------
+
+function randomInRange(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+/**
+ * Apply a blink overlay to a parameter vector. Blink multiplies the lid
+ * openness so any current expression continues to show through underneath.
+ */
+function applyBlink(p: ExpressionParams, blink: number): ExpressionParams {
+  if (blink <= 0) return p;
+  const m = 1 - blink;
+  return { ...p, lidOpenL: p.lidOpenL * m, lidOpenR: p.lidOpenR * m };
+}
+
+// ---------- Component -----------------------------------------------------
+
+export function TalkingHeadAvatar(props: TalkingHeadAvatarProps) {
+  const {
+    emotion,
+    speaking,
+    intensity = 1,
+    lookX = 0,
+    lookY = 0,
+    size = 256,
+    palette,
+    className,
+    ariaLabel = "Talking head avatar",
+  } = props;
+
+  const colors = useMemo(() => resolvePalette(palette), [palette]);
+
+  // Live (interpolated) parameter vector. We keep it in a ref so the RAF
+  // loop can mutate it every frame without re-running the component.
+  const liveRef = useRef<ExpressionParams>(neutralParams());
+
+  // Renderable state — updated ~60fps via setState on each frame.
+  const [render, setRender] = useState<{
+    params: ExpressionParams;
+    bob: number;
+    glowPulse: number;
+    blink: number;
+    speakShape: AvatarMouthShape | null;
+    speakOpen: number;
+    idleDriftX: number;
+    idleDriftY: number;
+  }>(() => ({
+    params: neutralParams(),
+    bob: 0,
+    glowPulse: 0,
+    blink: 0,
+    speakShape: null,
+    speakOpen: 0,
+    idleDriftX: 0,
+    idleDriftY: 0,
+  }));
+
+  // Target preset — recomputed whenever the emotion or intensity changes.
+  // We blend the neutral preset toward the target preset by `intensity` so
+  // low-intensity expressions are visibly softer without needing separate presets.
+  const target = useMemo<ExpressionParams>(() => {
+    const t = clamp01(intensity);
+    const targetPreset = EXPRESSION_PRESETS[emotion] ?? EXPRESSION_PRESETS.neutral;
+    return blendParams(EXPRESSION_PRESETS.neutral, targetPreset, t);
+  }, [emotion, intensity]);
+
+  // Keep the target in a ref so the RAF loop always reads the latest without
+  // forcing us to re-subscribe the loop on every prop change.
+  const targetRef = useRef<ExpressionParams>(target);
+  useEffect(() => {
+    targetRef.current = target;
+  }, [target]);
+
+  // Blink state (managed inside the loop via nextBlinkAt / blinkPhase)
+  const blinkRef = useRef<{
+    nextAt: number;
+    // 0 = idle, 1 = closing, 2 = opening
+    phase: 0 | 1 | 2;
+    phaseStart: number;
+  }>({
+    nextAt: performance.now() + randomInRange(BLINK_MIN_INTERVAL_MS, BLINK_MAX_INTERVAL_MS),
+    phase: 0,
+    phaseStart: 0,
+  });
+
+  // Speaking state
+  const speakRef = useRef<{
+    speaking: boolean;
+    shape: AvatarMouthShape;
+    open: number;
+    nextChangeAt: number;
+  }>({
+    speaking: false,
+    shape: "closed",
+    open: 0,
+    nextChangeAt: 0,
+  });
+
+  // Keep ref up to date without restarting the loop.
+  const speakingRef = useRef(speaking);
+  useEffect(() => {
+    speakingRef.current = speaking;
+    if (!speaking) {
+      speakRef.current.shape = "closed";
+      speakRef.current.open = 0;
+    } else if (speakRef.current.nextChangeAt === 0) {
+      speakRef.current.nextChangeAt = performance.now();
+    }
+  }, [speaking]);
+
+  const emotionRef = useRef(emotion);
+  useEffect(() => {
+    emotionRef.current = emotion;
+  }, [emotion]);
+
+  // Main animation loop.
+  useEffect(() => {
+    let raf = 0;
+    let lastT = performance.now();
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - lastT) / 1000);
+      lastT = now;
+
+      // --- Ease the live parameter vector toward the target ---
+      const k = 1 - Math.exp(-EXPRESSION_EASE * dt);
+      const live = liveRef.current;
+      const tgt = targetRef.current;
+      live.browAngleL = lerp(live.browAngleL, tgt.browAngleL, k);
+      live.browAngleR = lerp(live.browAngleR, tgt.browAngleR, k);
+      live.browYL = lerp(live.browYL, tgt.browYL, k);
+      live.browYR = lerp(live.browYR, tgt.browYR, k);
+      live.lidOpenL = lerp(live.lidOpenL, tgt.lidOpenL, k);
+      live.lidOpenR = lerp(live.lidOpenR, tgt.lidOpenR, k);
+      live.pupilOffsetX = lerp(live.pupilOffsetX, tgt.pupilOffsetX, k);
+      live.pupilOffsetY = lerp(live.pupilOffsetY, tgt.pupilOffsetY, k);
+      live.mouthOpen = lerp(live.mouthOpen, tgt.mouthOpen, k);
+      live.glowStrength = lerp(live.glowStrength, tgt.glowStrength, k);
+      // Mouth shape categorical: snap unless we're speaking (speak loop owns it).
+      live.mouth = tgt.mouth;
+
+      // --- Blink state machine ---
+      const b = blinkRef.current;
+      let blinkAmount = 0;
+      if (b.phase === 0 && now >= b.nextAt) {
+        b.phase = 1;
+        b.phaseStart = now;
+      }
+      if (b.phase === 1) {
+        const p = clamp01((now - b.phaseStart) / BLINK_CLOSE_MS);
+        blinkAmount = p;
+        if (p >= 1) {
+          b.phase = 2;
+          b.phaseStart = now;
+        }
+      } else if (b.phase === 2) {
+        const p = clamp01((now - b.phaseStart) / BLINK_OPEN_MS);
+        blinkAmount = 1 - p;
+        if (p >= 1) {
+          b.phase = 0;
+          b.nextAt = now + randomInRange(BLINK_MIN_INTERVAL_MS, BLINK_MAX_INTERVAL_MS);
+        }
+      }
+
+      // --- Speaking mouth cycle ---
+      const s = speakRef.current;
+      if (speakingRef.current) {
+        if (now >= s.nextChangeAt) {
+          // Pick a new shape with mild randomness and occasional closes.
+          const r = Math.random();
+          let nextShape: AvatarMouthShape;
+          if (r < 0.15) nextShape = "closed";
+          else if (r < 0.55) nextShape = "mid";
+          else nextShape = "open";
+          // Let current emotion tint the base mouth slightly.
+          const em: AvatarEmotion = emotionRef.current;
+          if (em === "happy" && nextShape !== "closed" && Math.random() < 0.5) {
+            nextShape = "smile";
+          }
+          s.shape = nextShape;
+          s.open = nextShape === "open" ? randomInRange(0.6, 1) : nextShape === "mid" ? randomInRange(0.3, 0.6) : 0;
+          s.nextChangeAt = now + randomInRange(SPEAK_STEP_MIN_MS, SPEAK_STEP_MAX_MS);
+        }
+      } else {
+        s.shape = "closed";
+        s.open = 0;
+      }
+
+      // --- Idle bob / glow pulse ---
+      const bobPhase = (now % IDLE_BOB_PERIOD_MS) / IDLE_BOB_PERIOD_MS;
+      const bob = Math.sin(bobPhase * Math.PI * 2) * IDLE_BOB_AMPLITUDE;
+      const glowPulse = (Math.sin(bobPhase * Math.PI * 2 + 0.8) + 1) / 2; // 0..1
+
+      // --- Idle pupil drift (only if emotion doesn't demand strong gaze) ---
+      const driftPhase = (now % IDLE_DRIFT_PERIOD_MS) / IDLE_DRIFT_PERIOD_MS;
+      const idleDriftX = Math.sin(driftPhase * Math.PI * 2) * IDLE_DRIFT_AMPLITUDE;
+      const idleDriftY = Math.cos(driftPhase * Math.PI * 2 * 0.7) * IDLE_DRIFT_AMPLITUDE * 0.5;
+
+      setRender({
+        params: { ...live },
+        bob,
+        glowPulse,
+        blink: blinkAmount,
+        speakShape: speakingRef.current ? s.shape : null,
+        speakOpen: s.open,
+        idleDriftX,
+        idleDriftY,
+      });
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // ---------- Derive render values ----------------------------------------
+
+  const effective = applyBlink(render.params, render.blink);
+
+  // Clamp user-provided look direction into safe eye-internal bounds.
+  const gazeX = clamp(lookX, -1, 1) * 2.6 + render.idleDriftX;
+  const gazeY = clamp(lookY, -1, 1) * 2.0 + render.idleDriftY;
+  const pupilDX = clamp(effective.pupilOffsetX + gazeX, -3.5, 3.5);
+  const pupilDY = clamp(effective.pupilOffsetY + gazeY, -3.0, 3.0);
+
+  // Base mouth + live speak override
+  const mouthShape: string = render.speakShape ?? effective.mouth;
+  const mouthOpen = render.speakShape ? render.speakOpen : effective.mouthOpen;
+
+  const glowOpacity = 0.35 * effective.glowStrength * (0.85 + 0.15 * render.glowPulse);
+
+  // ---------- Render ------------------------------------------------------
+
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}
+      role="img"
+      aria-label={ariaLabel}
+      style={{ display: "block", background: colors.background }}
+    >
+      <defs>
+        <radialGradient id="avatar-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={colors.glow} stopOpacity={1} />
+          <stop offset="60%" stopColor={colors.glow} stopOpacity={0.55} />
+          <stop offset="100%" stopColor={colors.glow} stopOpacity={0} />
+        </radialGradient>
+        <clipPath id="avatar-face-clip">
+          <path d={headSilhouettePath()} />
+        </clipPath>
+      </defs>
+
+      {/* 1. glow */}
+      <g opacity={glowOpacity}>
+        <circle cx={128} cy={130} r={116} fill="url(#avatar-glow)" />
+      </g>
+
+      {/* Whole-head transform for idle bob */}
+      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
+        {/* 2. head silhouette (stroke first under fill for chunky outline) */}
+        <path
+          d={headSilhouettePath()}
+          fill={colors.face}
+          stroke={colors.outline}
+          strokeWidth={4}
+          strokeLinejoin="round"
+        />
+
+        {/* 6. ear (behind hair so hair can overlap a touch) */}
+        <path
+          d={earPath()}
+          fill={colors.face}
+          stroke={colors.outline}
+          strokeWidth={3.5}
+          strokeLinejoin="round"
+        />
+
+        {/* Clip remaining face features to the head silhouette so hair/beard
+            never poke outside. */}
+        <g clipPath="url(#avatar-face-clip)">
+          {/* 3. face fill is already drawn via head silhouette */}
+
+          {/* 4. hair */}
+          <g>
+            <path d={hairMainPath()} fill={colors.hairDark} stroke={colors.outline} strokeWidth={3} strokeLinejoin="round" />
+            <path d={hairHighlightPath()} fill={colors.hairLight} opacity={0.85} />
+          </g>
+
+          {/* 5. beard */}
+          <g>
+            <path
+              d={beardPath()}
+              fill={colors.beard}
+              stroke={colors.outline}
+              strokeWidth={3}
+              strokeLinejoin="round"
+              opacity={0.95}
+            />
+            <path d={mustachePath()} fill={colors.beard} stroke={colors.outline} strokeWidth={2.5} strokeLinejoin="round" />
+          </g>
+        </g>
+
+        {/* 7. glasses — drawn above skin so they read strongly */}
+        <Glasses colors={colors} />
+
+        {/* 9. eyes — inside lens (drawn after glasses so lens tint sits behind eyes) */}
+        <Eyes params={effective} colors={colors} />
+
+        {/* 10. pupils */}
+        <Pupils
+          dx={pupilDX}
+          dy={pupilDY}
+          lidOpenL={effective.lidOpenL}
+          lidOpenR={effective.lidOpenR}
+          colors={colors}
+        />
+
+        {/* 8. eyebrows — on top of glasses bridge so they always read */}
+        <Brows params={effective} colors={colors} />
+
+        {/* 11. mouth */}
+        <Mouth shape={mouthShape} openAmount={mouthOpen} colors={colors} />
+      </g>
+    </svg>
+  );
+}
+
+// ---------- Feature subcomponents ----------------------------------------
+
+function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
+  const gL = GEOMETRY.glassL;
+  const gR = GEOMETRY.glassR;
+  const bridgeY = GEOMETRY.glassBridgeY;
+  return (
+    <g>
+      {/* Lens tint */}
+      <rect x={gL.x} y={gL.y} width={gL.w} height={gL.h} rx={gL.r} ry={gL.r} fill={colors.glassesLens} />
+      <rect x={gR.x} y={gR.y} width={gR.w} height={gR.h} rx={gR.r} ry={gR.r} fill={colors.glassesLens} />
+      {/* Rims */}
+      <rect
+        x={gL.x}
+        y={gL.y}
+        width={gL.w}
+        height={gL.h}
+        rx={gL.r}
+        ry={gL.r}
+        fill="none"
+        stroke={colors.glasses}
+        strokeWidth={4.5}
+      />
+      <rect
+        x={gR.x}
+        y={gR.y}
+        width={gR.w}
+        height={gR.h}
+        rx={gR.r}
+        ry={gR.r}
+        fill="none"
+        stroke={colors.glasses}
+        strokeWidth={4.5}
+      />
+      {/* Inner rim outline (black) for chunky contrast */}
+      <rect
+        x={gL.x}
+        y={gL.y}
+        width={gL.w}
+        height={gL.h}
+        rx={gL.r}
+        ry={gL.r}
+        fill="none"
+        stroke={colors.outline}
+        strokeWidth={1.4}
+      />
+      <rect
+        x={gR.x}
+        y={gR.y}
+        width={gR.w}
+        height={gR.h}
+        rx={gR.r}
+        ry={gR.r}
+        fill="none"
+        stroke={colors.outline}
+        strokeWidth={1.4}
+      />
+      {/* Bridge */}
+      <line x1={gL.x + gL.w} y1={bridgeY} x2={gR.x} y2={bridgeY} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
+      {/* Temples (side arms) peeking to the edges */}
+      <line x1={gR.x + gR.w} y1={gR.y + gR.h * 0.4} x2={gR.x + gR.w + 18} y2={gR.y + gR.h * 0.35} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
+      <line x1={gL.x} y1={gL.y + gL.h * 0.4} x2={gL.x - 16} y2={gL.y + gL.h * 0.35} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
+    </g>
+  );
+}
+
+function Eyes({ params, colors }: { params: ExpressionParams; colors: Required<AvatarPalette> }) {
+  const eL = GEOMETRY.eyeL;
+  const eR = GEOMETRY.eyeR;
+  // Scale the vertical radius of the white by lid openness so closed lids
+  // visibly squash the eye shape.
+  const ryL = eL.ry * clamp01(params.lidOpenL);
+  const ryR = eR.ry * clamp01(params.lidOpenR);
+  return (
+    <g>
+      <ellipse cx={eL.cx} cy={eL.cy} rx={eL.rx} ry={ryL} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2} />
+      <ellipse cx={eR.cx} cy={eR.cy} rx={eR.rx} ry={ryR} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2} />
+    </g>
+  );
+}
+
+function Pupils({
+  dx,
+  dy,
+  lidOpenL,
+  lidOpenR,
+  colors,
+}: {
+  dx: number;
+  dy: number;
+  lidOpenL: number;
+  lidOpenR: number;
+  colors: Required<AvatarPalette>;
+}) {
+  const eL = GEOMETRY.eyeL;
+  const eR = GEOMETRY.eyeR;
+  // Pupils are tall vertical ovals. Squash with lid close so they don't
+  // poke through closed lids.
+  const pRxBase = 3.2;
+  const pRyBase = 6.5;
+  const pRyL = pRyBase * clamp01(lidOpenL);
+  const pRyR = pRyBase * clamp01(lidOpenR);
+  // Hide pupils entirely when lids are almost closed so blinks read clean.
+  const visL = lidOpenL > 0.08 ? 1 : 0;
+  const visR = lidOpenR > 0.08 ? 1 : 0;
+  return (
+    <g>
+      <ellipse
+        cx={eL.cx + dx}
+        cy={eL.cy + dy}
+        rx={pRxBase}
+        ry={pRyL}
+        fill={colors.pupil}
+        opacity={visL}
+      />
+      <ellipse
+        cx={eR.cx + dx}
+        cy={eR.cy + dy}
+        rx={pRxBase}
+        ry={pRyR}
+        fill={colors.pupil}
+        opacity={visR}
+      />
+    </g>
+  );
+}
+
+function Brows({ params, colors }: { params: ExpressionParams; colors: Required<AvatarPalette> }) {
+  const dL = browPath(GEOMETRY.browL, params.browAngleL, params.browYL, true);
+  const dR = browPath(GEOMETRY.browR, params.browAngleR, params.browYR, false);
+  return (
+    <g fill="none" stroke={colors.outline} strokeWidth={6} strokeLinecap="round">
+      <path d={dL} />
+      <path d={dR} />
+    </g>
+  );
+}
+
+function Mouth({
+  shape,
+  openAmount,
+  colors,
+}: {
+  shape: string;
+  openAmount: number;
+  colors: Required<AvatarPalette>;
+}) {
+  const d = mouthPath(shape, openAmount);
+  const isFilled = shape === "open" || shape === "mid";
+  return (
+    <path
+      d={d}
+      fill={isFilled ? colors.mouth : "none"}
+      stroke={colors.outline}
+      strokeWidth={3.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  );
+}
+
+export default TalkingHeadAvatar;
