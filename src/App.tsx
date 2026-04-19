@@ -1,188 +1,178 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CombinedAvatar,
-  OriginalAvatar,
-  TalkingHeadAvatar,
-  mapConversationToAvatarState,
+  classifyMessage,
+  useSpeechSynthesis,
   type AvatarEmotion,
   type AvatarState,
 } from "./avatar";
 import "./App.css";
 
-type AvatarMode = "combined" | "original" | "animated";
+type LogEntry = {
+  id: number;
+  text: string;
+  emotion: AvatarEmotion;
+  intensity: number;
+  signals: string[];
+  at: number;
+};
 
-const EMOTIONS: AvatarEmotion[] = [
-  "neutral",
-  "skeptical",
-  "confused",
-  "happy",
-  "thinking",
-  "listening",
-];
+// Size of the avatar on the page. Fixed for the chat-style layout.
+const AVATAR_SIZE = 340;
 
 export default function App() {
-  const [mode, setMode] = useState<AvatarMode>("combined");
-  const [emotion, setEmotion] = useState<AvatarEmotion>("neutral");
-  const [speaking, setSpeaking] = useState(false);
-  const [intensity, setIntensity] = useState(1);
-  const [lookX, setLookX] = useState(0);
-  const [lookY, setLookY] = useState(0);
-  const [size, setSize] = useState(320);
+  const [message, setMessage] = useState("");
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const [currentEmotion, setCurrentEmotion] = useState<AvatarEmotion>("neutral");
+  const [currentIntensity, setCurrentIntensity] = useState(1);
+  const [muted, setMuted] = useState(false);
 
-  const state: AvatarState = { emotion, speaking, intensity, lookX, lookY, size };
+  const { speaking, supported, speak, cancel } = useSpeechSynthesis();
+  const logIdRef = useRef(0);
 
-  const sampleAi = {
-    sentiment: "analytical",
-    tone: "confident",
-    isSpeaking: speaking,
-    intensity,
-    lookX,
-    lookY,
+  // Ease the expression back to neutral a moment after speech ends so the
+  // avatar doesn't stay locked in the last emotion forever.
+  useEffect(() => {
+    if (speaking) return;
+    if (currentEmotion === "neutral") return;
+    const t = window.setTimeout(() => setCurrentEmotion("neutral"), 900);
+    return () => window.clearTimeout(t);
+  }, [speaking, currentEmotion]);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = message.trim();
+    if (!text) return;
+
+    const classification = classifyMessage(text);
+    setCurrentEmotion(classification.emotion);
+    setCurrentIntensity(classification.intensity);
+
+    setLog((prev) => [
+      ...prev,
+      {
+        id: ++logIdRef.current,
+        text,
+        emotion: classification.emotion,
+        intensity: classification.intensity,
+        signals: classification.signals,
+        at: Date.now(),
+      },
+    ]);
+
+    setMessage("");
+
+    if (!muted) {
+      // Fire-and-forget speech. The hook updates `speaking` so the
+      // avatar's mouth animates in sync with real TTS start/stop.
+      speak(text);
+    } else {
+      // In muted mode we still want the mouth to animate so the user can
+      // test expression + mouth cycle. Drive a short synthetic window
+      // proportional to the message length.
+      simulateSpeak(text);
+    }
   };
-  const mapped = useMemo(() => mapConversationToAvatarState(sampleAi), [
-    sampleAi.sentiment,
-    sampleAi.tone,
-    sampleAi.isSpeaking,
-    sampleAi.intensity,
-    sampleAi.lookX,
-    sampleAi.lookY,
-  ]);
+
+  // Muted "fake speaking" window: toggles the speakingOverride state for
+  // a duration based on message length so the mouth still animates and
+  // the expression eases back to neutral after.
+  const [speakingOverride, setSpeakingOverride] = useState(false);
+  const simulateRef = useRef<number | null>(null);
+  const simulateSpeak = (text: string) => {
+    if (simulateRef.current) window.clearTimeout(simulateRef.current);
+    setSpeakingOverride(true);
+    const ms = Math.min(7000, Math.max(900, text.length * 60));
+    simulateRef.current = window.setTimeout(() => {
+      setSpeakingOverride(false);
+      simulateRef.current = null;
+    }, ms);
+  };
+  useEffect(() => () => {
+    if (simulateRef.current) window.clearTimeout(simulateRef.current);
+  }, []);
+
+  // Effective state fed into the avatar. Real TTS state wins; otherwise
+  // use the simulated window (for muted mode).
+  const avatarState: AvatarState = {
+    emotion: currentEmotion,
+    speaking: speaking || speakingOverride,
+    intensity: currentIntensity,
+    size: AVATAR_SIZE,
+  };
 
   return (
     <div className="page">
       <header className="header">
-        <h1>TalkingHeadAvatar</h1>
-        <p className="tagline">
-          Self-contained, SVG-driven, parametric talking head. No raster assets,
-          no sprite sheets, no external services.
-        </p>
+        <h1>Talking Head</h1>
+        <p className="tagline">Type a message — the avatar will repeat it with an expression that matches.</p>
       </header>
 
       <main className="stage-wrap">
-        <div className="stage" style={{ width: size + 48, height: size + 48 }}>
-          {mode === "combined" ? (
-            <CombinedAvatar {...state} />
-          ) : mode === "original" ? (
-            <OriginalAvatar size={size} />
-          ) : (
-            <TalkingHeadAvatar {...state} />
-          )}
+        <div className="stage" style={{ width: AVATAR_SIZE + 48, height: AVATAR_SIZE + 48 }}>
+          <CombinedAvatar {...avatarState} />
         </div>
 
-        <section className="controls" aria-label="Avatar controls">
-          <h2>Controls</h2>
-
-          <label className="row">
-            <span>Render mode</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value as AvatarMode)}>
-              <option value="combined">combined (artwork + animated)</option>
-              <option value="original">original artwork (static)</option>
-              <option value="animated">parametric (fallback)</option>
-            </select>
-          </label>
-
-          <label className="row">
-            <span>Emotion</span>
-            <select
-              value={emotion}
-              onChange={(e) => setEmotion(e.target.value as AvatarEmotion)}
-            >
-              {EMOTIONS.map((em) => (
-                <option key={em} value={em}>
-                  {em}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="row switch">
-            <span>Speaking</span>
+        <section className="chat" aria-label="Message the avatar">
+          <form className="composer" onSubmit={handleSubmit}>
             <input
-              type="checkbox"
-              checked={speaking}
-              onChange={(e) => setSpeaking(e.target.checked)}
+              type="text"
+              className="composer-input"
+              placeholder={
+                supported
+                  ? "Say something for me to repeat…"
+                  : "Say something (your browser doesn't support speech — avatar still animates)"
+              }
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) handleSubmit();
+              }}
+              autoFocus
+              aria-label="Message"
             />
-          </label>
+            <button className="composer-submit" type="submit" disabled={!message.trim()}>
+              {speaking ? "Stop" : "Send"}
+            </button>
+          </form>
 
-          <Slider label="Intensity" min={0} max={1} step={0.01} value={intensity} onChange={setIntensity} />
-          <Slider label="Look X" min={-1} max={1} step={0.01} value={lookX} onChange={setLookX} />
-          <Slider label="Look Y" min={-1} max={1} step={0.01} value={lookY} onChange={setLookY} />
-          <Slider label="Size (px)" min={96} max={512} step={1} value={size} onChange={setSize} />
-
-          <div className="preset-row">
-            <span>Quick presets:</span>
-            {EMOTIONS.map((em) => (
-              <button key={em} className="preset" onClick={() => setEmotion(em)} type="button">
-                {em}
+          <div className="chat-toolbar">
+            <label className="toggle">
+              <input type="checkbox" checked={muted} onChange={(e) => setMuted(e.target.checked)} />
+              <span>Mute (animate only)</span>
+            </label>
+            {speaking && (
+              <button className="stop-button" type="button" onClick={cancel}>
+                Stop speaking
               </button>
-            ))}
+            )}
+          </div>
+
+          <div className="log" aria-live="polite">
+            {log.length === 0 ? (
+              <p className="log-empty">Try: <em>"Hi there!"</em>, <em>"Really? I doubt that."</em>, or <em>"Hmm… let me think."</em></p>
+            ) : (
+              <ul>
+                {log.slice().reverse().map((entry) => (
+                  <li key={entry.id} className={`log-entry log-${entry.emotion}`}>
+                    <span className={`log-badge log-badge-${entry.emotion}`}>{entry.emotion}</span>
+                    <span className="log-text">{entry.text}</span>
+                    {entry.signals.length > 0 && (
+                      <span className="log-signals">{entry.signals.join(" · ")}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
       </main>
 
-      <section className="panels">
-        <article className="panel">
-          <h3>Current avatar state</h3>
-          <pre>{JSON.stringify(state, null, 2)}</pre>
-        </article>
-
-        <article className="panel">
-          <h3>Sample AI -&gt; avatar mapping</h3>
-          <p className="panel-hint">
-            Feed any LLM-produced <code>sentiment</code> / <code>tone</code> /{" "}
-            <code>isSpeaking</code> into <code>mapConversationToAvatarState()</code>.
-          </p>
-          <div className="side-by-side">
-            <div>
-              <h4>Input</h4>
-              <pre>{JSON.stringify(sampleAi, null, 2)}</pre>
-            </div>
-            <div>
-              <h4>Mapped state</h4>
-              <pre>{JSON.stringify(mapped, null, 2)}</pre>
-            </div>
-          </div>
-        </article>
-      </section>
-
       <footer className="footer">
         <small>
-          Rendered with <code>&lt;svg&gt;</code> + React. No canvas frames, no
-          sprite sheets, no image generation.
+          Classifier + Web Speech API → animated SVG. No external services.
         </small>
       </footer>
     </div>
-  );
-}
-
-function Slider({
-  label,
-  min,
-  max,
-  step,
-  value,
-  onChange,
-}: {
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="row">
-      <span>
-        {label} <em>{value.toFixed(step < 1 ? 2 : 0)}</em>
-      </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </label>
   );
 }
