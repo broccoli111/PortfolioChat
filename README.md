@@ -82,19 +82,31 @@ src/avatar/
 Rendered in this order so silhouette, glow, and features read cleanly:
 
 1. glow (radial gradient halo)
-2. head silhouette (face fill + thick outline)
-3. face fill
-4. hair (dark mass + one lighter highlight patch)
-5. beard (soft gray mass + mustache)
-6. ear (far side of the 3/4 turn)
-7. glasses (amber rims + bridge + temples + lens tint)
-8. eyebrows (thick rounded strokes)
-9. eyes (white ovals + outline)
-10. pupils (tall vertical black ovals)
-11. mouth (path that switches between presets)
+2. ear (drawn first so the head outline crosses cleanly over its inner edge)
+3. head silhouette (cream face fill + heavy black sticker outline)
+4. hair (dark mass + one lighter side-highlight block)
+5. beard (medium-gray mass + mustache)
+6. glasses (amber rims + bridge + temples, with a fine dark inner contour)
+7. eye whites (outlined ovals)
+8. pupils (tall vertical black ovals)
+9. eyebrows (thick rounded strokes above the lenses)
+10. mouth (path that switches between presets)
+11. optional subtle diagonal lens highlights
 
-Hair, beard, and mustache are clipped to the head silhouette so they can be
-drawn with broad strokes without poking out past the head outline.
+Hair, beard, and mustache are clipped to the head silhouette so their
+confident shapes never poke past the outer contour.
+
+### 3/4 turn
+
+The slight 3/4 facing is baked into the geometry rather than produced by
+rotating the SVG:
+
+- facial mass biased a touch to the viewer's left (chin ~x=118)
+- oversized ear on the viewer's right, sitting outside the silhouette
+- jaw and beard taper inward on the far side
+- near-side lens is slightly wider than the far-side lens
+- near-side eye and brow are slightly larger
+- glasses bridge slopes down a touch toward the far side
 
 ### Parametric animation
 
