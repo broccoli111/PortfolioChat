@@ -1,15 +1,15 @@
 import { useMemo, useState } from "react";
 import {
   CombinedAvatar,
+  OriginalAvatar,
   TalkingHeadAvatar,
-  TracedAvatar,
   mapConversationToAvatarState,
   type AvatarEmotion,
   type AvatarState,
 } from "./avatar";
 import "./App.css";
 
-type AvatarMode = "combined" | "traced" | "animated";
+type AvatarMode = "combined" | "original" | "animated";
 
 const EMOTIONS: AvatarEmotion[] = [
   "neutral",
@@ -62,8 +62,8 @@ export default function App() {
         <div className="stage" style={{ width: size + 48, height: size + 48 }}>
           {mode === "combined" ? (
             <CombinedAvatar {...state} />
-          ) : mode === "traced" ? (
-            <TracedAvatar size={size} />
+          ) : mode === "original" ? (
+            <OriginalAvatar size={size} />
           ) : (
             <TalkingHeadAvatar {...state} />
           )}
@@ -75,9 +75,9 @@ export default function App() {
           <label className="row">
             <span>Render mode</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as AvatarMode)}>
-              <option value="combined">combined (traced + animated)</option>
-              <option value="traced">traced (static reference)</option>
-              <option value="animated">animated (parametric)</option>
+              <option value="combined">combined (artwork + animated)</option>
+              <option value="original">original artwork (static)</option>
+              <option value="animated">parametric (fallback)</option>
             </select>
           </label>
 

@@ -1,23 +1,20 @@
 /**
- * CombinedAvatar — traced reference portrait with animated features.
+ * CombinedAvatar — the original Figma artwork composited with animated
+ * eyes / pupils / brows / mouth.
  *
  * Rendering recipe:
- *   1. Paint the full traced SVG as a pixel-accurate base plate. This
- *      gives us the exact silhouette, hair, beard, glasses, ear, and
- *      glow from the reference image.
- *   2. Paint face-colored erasers over the lens interiors and mouth
- *      region so the baked-in traced pupils / mouth / soul patch /
- *      mustache don't show through underneath our animated overlay.
- *   3. Re-stroke the amber glasses rims on top so the eraser can't
- *      nick the frame shapes.
- *   4. Draw animated eye whites, pupils, catch-lights, brows, and
- *      mouth at the anchor positions measured from the trace.
- *   5. Drive everything with the same requestAnimationFrame loop used
- *      by TalkingHeadAvatar (blink, speaking mouth cycle, idle bob,
- *      pupil drift, emotion easing).
+ *   1. Paint the source artwork (face, hair, beard, ear, glasses, nose)
+ *      verbatim — identical to what the artist drew.
+ *   2. Paint face-colored ellipses over the pupil and mouth regions to
+ *      wipe the baked-in features so the animated overlay can replace
+ *      them cleanly.
+ *   3. Draw animated eye whites, pupils, catch-lights, brows, and mouth
+ *      at the exact anchor positions measured from the source SVG.
+ *   4. Drive the parameter vector with an rAF loop (emotion easing,
+ *      blink, speaking cycle, idle bob, pupil drift).
  *
- * The API matches `AvatarState` so the component is a drop-in for the
- * existing demo controls and LLM mapper.
+ * Everything lives inside the Figma `feGaussianBlur` drop shadow from the
+ * source so the amber glow renders identically to the original.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AvatarEmotion, AvatarMouthShape, AvatarPalette, AvatarState } from "./types";
@@ -31,14 +28,15 @@ import {
   type ExpressionParams,
 } from "./expressions";
 import { mouthPath } from "./geometry";
-import { resolvePalette } from "./palette";
 import {
-  TRACED_ANCHORS,
-  TRACED_ERASE_REGIONS,
-  TRACED_PAINT_ORDER,
-  TRACE_TRANSFORM,
-  TRACE_VIEWBOX,
-} from "./tracedGeometry";
+  ORIGINAL_ANCHORS,
+  ORIGINAL_BACKDROP,
+  ORIGINAL_COLORS,
+  ORIGINAL_ERASERS,
+  ORIGINAL_GLOW_FILTER_ID,
+  ORIGINAL_VIEWBOX,
+} from "./originalArtwork";
+import { resolvePalette } from "./palette";
 
 export type CombinedAvatarProps = AvatarState & {
   palette?: AvatarPalette;
@@ -46,7 +44,7 @@ export type CombinedAvatarProps = AvatarState & {
   ariaLabel?: string;
 };
 
-// ---------- Animation tuning (mirrors TalkingHeadAvatar) -----------------
+// ---------- Animation tuning --------------------------------------------
 
 const EXPRESSION_EASE = 6;
 const IDLE_BOB_AMPLITUDE = 1.2;
@@ -57,7 +55,7 @@ const BLINK_CLOSE_MS = 95;
 const BLINK_OPEN_MS = 140;
 const SPEAK_STEP_MIN_MS = 80;
 const SPEAK_STEP_MAX_MS = 170;
-const IDLE_DRIFT_AMPLITUDE = 0.7;
+const IDLE_DRIFT_AMPLITUDE = 0.6;
 const IDLE_DRIFT_PERIOD_MS = 5400;
 
 function randomInRange(min: number, max: number) {
@@ -70,27 +68,22 @@ function applyBlink(p: ExpressionParams, blink: number): ExpressionParams {
   return { ...p, lidOpenL: p.lidOpenL * m, lidOpenR: p.lidOpenR * m };
 }
 
-// ---------- Feature geometry tuned to traced anchors ---------------------
-//
-// Sizes were chosen to match the reference portrait: eye whites fill the
-// traced lens interior, pupils are tall vertical ovals that fill most of
-// the white, catch-lights sit upper-inner, brows are thick rounded bars
-// sitting just above the rim, and the mouth curve anchors below the
-// beard's upper edge.
-const EYE_RX = 17;
-const EYE_RY = 18;
-const PUPIL_RX = 6.5;
+// ---------- Feature sizing (calibrated to the source artwork) -----------
+
+// The source pupils are ~9x12 tall ovals. We use slightly smaller white
+// caps and taller pupils so blinks compress them naturally.
+// Sizes calibrated directly to the source pupil shapes:
+// source left pupil: ~15 wide, 24 tall;  source right pupil: ~18 wide, 25 tall.
+// catch-light: rx=4.5 ry=3.5 peach ellipse offset lower-left of pupil center.
+const EYE_RX = 9;
+const EYE_RY = 12;
+const PUPIL_RX = 8;
 const PUPIL_RY = 12;
-const CATCH_R = 2.6;
+const CATCH_RX = 4.5;
+const CATCH_RY = 3.5;
 const BROW_W = 26;
 
-/**
- * Build a filled brow SHAPE (not a stroke) — a chunky rounded bar with
- * top and bottom edges. This matches the reference illustration where
- * the brows are dark brown filled shapes, not line strokes.
- *
- * Angle convention: positive = outer edge UP.
- */
+/** Filled chunky brow shape (matches the stroke style of the source). */
 function browShapePath(
   anchor: { cx: number; cy: number; w: number },
   angleDeg: number,
@@ -108,8 +101,6 @@ function browShapePath(
   const innerY = y + tilt * 0.25;
   const ctrlY = (innerY + outerY) / 2 - 3;
   const t = thickness / 2;
-  // Build a closed shape with a top curve and a bottom curve, joined by
-  // rounded ends.
   return [
     `M ${innerX} ${innerY - t}`,
     `Q ${cx} ${ctrlY - t}, ${outerX} ${outerY - t}`,
@@ -120,7 +111,7 @@ function browShapePath(
   ].join(" ");
 }
 
-// ---------- Component ----------------------------------------------------
+// ---------- Component ---------------------------------------------------
 
 export function CombinedAvatar(props: CombinedAvatarProps) {
   const {
@@ -135,7 +126,21 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
     ariaLabel = "Talking head avatar",
   } = props;
 
-  const colors = useMemo(() => resolvePalette(palette), [palette]);
+  const userPalette = useMemo(() => resolvePalette(palette), [palette]);
+  // For the original-artwork composite we prefer the source palette for
+  // anything that touches the portrait (so the animated features match
+  // tone). `palette` prop can still override via DEFAULT_PALETTE.
+  const colors = {
+    skin: ORIGINAL_COLORS.skin,
+    ink: ORIGINAL_COLORS.ink,
+    black: ORIGINAL_COLORS.black,
+    hingeGray: ORIGINAL_COLORS.hingeGray,
+    eyeWhite: "#FFFFFF",
+    pupil: ORIGINAL_COLORS.black,
+    catchLight: ORIGINAL_COLORS.skin,
+    mouth: userPalette.mouth,
+    background: userPalette.background,
+  };
 
   const liveRef = useRef<ExpressionParams>(neutralParams());
   const [render, setRender] = useState(() => ({
@@ -205,7 +210,7 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
       live.glowStrength = lerp(live.glowStrength, tgt.glowStrength, k);
       live.mouth = tgt.mouth;
 
-      // Blink state machine
+      // Blink
       const b = blinkRef.current;
       let blinkAmount = 0;
       if (b.phase === 0 && now >= b.nextAt) {
@@ -228,7 +233,7 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
         }
       }
 
-      // Speaking mouth cycle
+      // Speaking cycle
       const s = speakRef.current;
       if (speakingRef.current) {
         if (now >= s.nextChangeAt) {
@@ -255,9 +260,9 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
         s.open = 0;
       }
 
+      // Idle bob / gaze drift
       const bobPhase = (now % IDLE_BOB_PERIOD_MS) / IDLE_BOB_PERIOD_MS;
       const bob = Math.sin(bobPhase * Math.PI * 2) * IDLE_BOB_AMPLITUDE;
-
       const driftPhase = (now % IDLE_DRIFT_PERIOD_MS) / IDLE_DRIFT_PERIOD_MS;
       const idleDriftX = Math.sin(driftPhase * Math.PI * 2) * IDLE_DRIFT_AMPLITUDE;
       const idleDriftY =
@@ -278,109 +283,148 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // ---------- Derived render values ----------------------------------
+  // ---------- Derive render values -------------------------------------
   const effective = applyBlink(render.params, render.blink);
-  const gazeX = clamp(lookX, -1, 1) * 3 + render.idleDriftX;
-  const gazeY = clamp(lookY, -1, 1) * 2.4 + render.idleDriftY;
-  const pupilDX = clamp(effective.pupilOffsetX + gazeX, -4, 4);
-  const pupilDY = clamp(effective.pupilOffsetY + gazeY, -3.4, 3.4);
+  const gazeX = clamp(lookX, -1, 1) * 2 + render.idleDriftX;
+  const gazeY = clamp(lookY, -1, 1) * 1.8 + render.idleDriftY;
+  const pupilDX = clamp(effective.pupilOffsetX + gazeX, -2.5, 2.5);
+  const pupilDY = clamp(effective.pupilOffsetY + gazeY, -2, 2);
   const mouthShape: string = render.speakShape ?? effective.mouth;
   const mouthOpen = render.speakShape ? render.speakOpen : effective.mouthOpen;
 
-  const eL = TRACED_ANCHORS.eyeL;
-  const eR = TRACED_ANCHORS.eyeR;
-  const bL = TRACED_ANCHORS.browL;
-  const bR = TRACED_ANCHORS.browR;
-  const lensL = TRACED_ERASE_REGIONS.lensL;
-  const lensR = TRACED_ERASE_REGIONS.lensR;
-  const mouthErase = TRACED_ERASE_REGIONS.mouth;
+  const eL = ORIGINAL_ANCHORS.eyeL;
+  const eR = ORIGINAL_ANCHORS.eyeR;
+  const bL = ORIGINAL_ANCHORS.browL;
+  const bR = ORIGINAL_ANCHORS.browR;
+  const mAnchor = ORIGINAL_ANCHORS.mouth;
 
-  const ryL = EYE_RY * clamp01(effective.lidOpenL);
-  const ryR = EYE_RY * clamp01(effective.lidOpenR);
   const pupRyL = PUPIL_RY * clamp01(effective.lidOpenL);
   const pupRyR = PUPIL_RY * clamp01(effective.lidOpenR);
   const pupVisL = effective.lidOpenL > 0.08 ? 1 : 0;
   const pupVisR = effective.lidOpenR > 0.08 ? 1 : 0;
 
-  const browDL = browShapePath({ cx: bL.cx, cy: bL.cy, w: BROW_W }, effective.browAngleL, effective.browYL, true, 5.5);
-  const browDR = browShapePath({ cx: bR.cx, cy: bR.cy, w: BROW_W }, effective.browAngleR, effective.browYR, false, 5.5);
+  const browDL = browShapePath({ cx: bL.cx, cy: bL.cy, w: BROW_W }, effective.browAngleL, effective.browYL, true, 5);
+  const browDR = browShapePath({ cx: bR.cx, cy: bR.cy, w: BROW_W }, effective.browAngleR, effective.browYR, false, 5);
 
   const mouthD = mouthPath(mouthShape, mouthOpen);
   const mouthFillColor =
     mouthShape === "open" || mouthShape === "mid"
       ? colors.mouth
       : mouthShape === "closed"
-      ? colors.outline
+      ? colors.ink
       : "none";
 
-  // Mouth path generator is authored against an anchor at (cx=124, cy=178)
-  // but our traced mouth lives at ~(110, 197). Translate the animated
-  // mouth onto the traced anchor with a <g transform>.
+  // geometry.mouthPath anchors at (124, 178); our source mouth sits at
+  // the anchor measured above. Translate the animated mouth onto it.
   const MOUTH_GEOMETRY_ANCHOR = { cx: 124, cy: 178 };
   const mouthShift = {
-    dx: TRACED_ANCHORS.mouth.cx - MOUTH_GEOMETRY_ANCHOR.cx,
-    dy: TRACED_ANCHORS.mouth.cy - MOUTH_GEOMETRY_ANCHOR.cy,
+    dx: mAnchor.cx - MOUTH_GEOMETRY_ANCHOR.cx,
+    dy: mAnchor.cy - MOUTH_GEOMETRY_ANCHOR.cy,
   };
 
-  // ---------- Render ------------------------------------------------
+  // ---------- Render ---------------------------------------------------
+  const B = ORIGINAL_BACKDROP;
+  const E = ORIGINAL_ERASERS;
+
   return (
     <svg
       width={size}
       height={size}
-      viewBox={`0 0 ${TRACE_VIEWBOX} ${TRACE_VIEWBOX}`}
+      viewBox={`0 0 ${ORIGINAL_VIEWBOX} ${ORIGINAL_VIEWBOX}`}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
       role="img"
       aria-label={ariaLabel}
       className={className}
-      style={{ display: "block", background: colors.background }}
+      style={{ display: "block", background: colors.background, overflow: "visible" }}
     >
-      {/* Whole-avatar idle bob */}
-      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
-        {/* ---- 1. Traced base plate (full reference paint order) ---- */}
-        <g transform={TRACE_TRANSFORM}>
-          {TRACED_PAINT_ORDER.map((p, i) => (
-            <path
-              key={i}
-              d={p.d}
-              fill={p.fill}
-              transform={p.transform || undefined}
-              data-layer={p.layer}
-            />
-          ))}
-        </g>
-
-        {/* ---- 2. Face-colored erasers wiping traced features ---- */}
-        <g>
-          <ellipse cx={lensL.cx} cy={lensL.cy} rx={lensL.rx} ry={lensL.ry} fill={colors.face} />
-          <ellipse cx={lensR.cx} cy={lensR.cy} rx={lensR.rx} ry={lensR.ry} fill={colors.face} />
-          <ellipse cx={mouthErase.cx} cy={mouthErase.cy} rx={mouthErase.rx} ry={mouthErase.ry} fill={colors.face} />
-        </g>
-
-        {/* ---- 3. Animated eye whites (behind pupils) ---- */}
-        <g>
-          <ellipse
-            cx={eL.cx}
-            cy={eL.cy}
-            rx={EYE_RX}
-            ry={ryL}
-            fill={colors.eyeWhite}
-            stroke={colors.outline}
-            strokeWidth={1.6}
-            opacity={0.95}
+      <defs>
+        {/* Figma drop-shadow filter: transparent blur -> amber orange.
+             Applied to the whole avatar <g> so the glow hugs the silhouette. */}
+        <filter
+          id={ORIGINAL_GLOW_FILTER_ID}
+          x="-24"
+          y="-24"
+          width="304"
+          height="304"
+          filterUnits="userSpaceOnUse"
+          colorInterpolationFilters="sRGB"
+        >
+          <feFlood floodOpacity="0" result="BackgroundImageFix" />
+          <feColorMatrix
+            in="SourceAlpha"
+            type="matrix"
+            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
+            result="hardAlpha"
           />
-          <ellipse
-            cx={eR.cx}
-            cy={eR.cy}
-            rx={EYE_RX}
-            ry={ryR}
-            fill={colors.eyeWhite}
-            stroke={colors.outline}
-            strokeWidth={1.6}
-            opacity={0.95}
-          />
-        </g>
+          <feOffset />
+          <feGaussianBlur stdDeviation="12" />
+          <feComposite in2="hardAlpha" operator="out" />
+          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.6 0 0 0 0 0 0 0 0 0.6 0" />
+          <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow" />
+          <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
+        </filter>
+      </defs>
 
-        {/* ---- 4. Animated pupils + catch-lights ---- */}
+      <g filter={`url(#${ORIGINAL_GLOW_FILTER_ID})`} transform={`translate(0 ${render.bob.toFixed(3)})`}>
+        {/* ---- 1. Source artwork backdrop ---- */}
+        {/* face fill (no stroke) */}
+        <path d={B.faceFill} fill={colors.skin} />
+        {/* face fill + outline */}
+        <path
+          d={B.faceOutline}
+          fill={colors.skin}
+          stroke={colors.ink}
+          strokeWidth={6}
+          strokeLinecap="round"
+        />
+        {/* hair */}
+        <path d={B.hair} fill={colors.ink} />
+        {/* beard main + accent */}
+        <path d={B.beardMain} fill={colors.ink} />
+        <path d={B.beardAccent} fill={colors.ink} />
+        {/* ear (fill + outline + inner whorl) */}
+        <path d={B.earFill} fill={colors.skin} />
+        <path
+          d={B.earOutline}
+          fill="none"
+          stroke={colors.ink}
+          strokeWidth={6}
+          strokeLinecap="round"
+        />
+        <path
+          d={B.earInner}
+          fill="none"
+          stroke={colors.black}
+          strokeWidth={6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* glasses compound shape */}
+        <path d={B.glasses} fill={colors.black} fillRule="evenodd" clipRule="evenodd" />
+        {/* hinge dots */}
+        <ellipse cx={B.hingeLeft.cx} cy={B.hingeLeft.cy} rx={B.hingeLeft.rx} ry={B.hingeLeft.ry} fill={colors.hingeGray} />
+        <ellipse cx={B.hingeRight.cx} cy={B.hingeRight.cy} rx={B.hingeRight.rx} ry={B.hingeRight.ry} fill={colors.hingeGray} />
+        {/* nose */}
+        <path d={B.noseFill} fill={colors.skin} />
+        <path
+          d={B.noseOutline}
+          fill="none"
+          stroke={colors.black}
+          strokeWidth={4}
+          strokeLinecap="round"
+        />
+
+        {/* ---- 2. Erasers wiping baked-in pupils / mouth ---- */}
+        <ellipse cx={E.lensL.cx} cy={E.lensL.cy} rx={E.lensL.rx} ry={E.lensL.ry} fill={colors.skin} />
+        <ellipse cx={E.lensR.cx} cy={E.lensR.cy} rx={E.lensR.rx} ry={E.lensR.ry} fill={colors.skin} />
+        <ellipse cx={E.mouth.cx} cy={E.mouth.cy} rx={E.mouth.rx} ry={E.mouth.ry} fill={colors.skin} />
+
+        {/* ---- 3. Animated pupils + catch-lights ---- */}
         <g>
+          {/* Animated pupils draw DIRECTLY (no eye-white behind them) so
+              they read like the source pupils sitting on skin inside the
+              glasses' black lens beds. */}
           <ellipse
             cx={eL.cx + pupilDX}
             cy={eL.cy + pupilDY}
@@ -397,35 +441,60 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
             fill={colors.pupil}
             opacity={pupVisR}
           />
-          <circle
-            cx={eL.cx + pupilDX + 1.8}
-            cy={eL.cy + pupilDY - 2.2}
-            r={CATCH_R * clamp01(effective.lidOpenL)}
+          {/* Catch-lights — peach-toned like the source (cx=80.75/125.75,
+              cy=144.543 in source → offset ~(-4, +3) from pupil center) */}
+          <ellipse
+            cx={eL.cx + pupilDX - 4}
+            cy={eL.cy + pupilDY + 3}
+            rx={CATCH_RX}
+            ry={CATCH_RY}
             fill={colors.catchLight}
-            opacity={pupVisL * 0.95}
+            opacity={pupVisL}
           />
-          <circle
-            cx={eR.cx + pupilDX + 1.8}
-            cy={eR.cy + pupilDY - 2.2}
-            r={CATCH_R * clamp01(effective.lidOpenR)}
+          <ellipse
+            cx={eR.cx + pupilDX - 4}
+            cy={eR.cy + pupilDY + 3}
+            rx={CATCH_RX}
+            ry={CATCH_RY}
             fill={colors.catchLight}
-            opacity={pupVisR * 0.95}
+            opacity={pupVisR}
           />
         </g>
 
-        {/* ---- 5. Animated brows (filled chunky bars, dark brown) ---- */}
-        <g fill={colors.outline} stroke="none">
+        {/* ---- 4. Eye lid (skin-colored) when blink is partial so it
+                    squashes the pupil from above cleanly ---- */}
+        {effective.lidOpenL < 0.98 && (
+          <ellipse
+            cx={eL.cx}
+            cy={eL.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenL))}
+            rx={EYE_RX + 1.5}
+            ry={EYE_RY * (1 - clamp01(effective.lidOpenL))}
+            fill={colors.skin}
+          />
+        )}
+        {effective.lidOpenR < 0.98 && (
+          <ellipse
+            cx={eR.cx}
+            cy={eR.cy - EYE_RY + EYE_RY * (1 - clamp01(effective.lidOpenR))}
+            rx={EYE_RX + 1.5}
+            ry={EYE_RY * (1 - clamp01(effective.lidOpenR))}
+            fill={colors.skin}
+          />
+        )}
+
+        {/* ---- 5. Animated brows (chunky brown bars) ---- */}
+        <g fill={colors.ink} stroke="none">
           <path d={browDL} />
           <path d={browDR} />
         </g>
 
-        {/* ---- 6. Animated mouth (translated onto traced anchor) ---- */}
+        {/* ---- 6. Animated mouth ---- */}
         <g transform={`translate(${mouthShift.dx} ${mouthShift.dy})`}>
           <path
             d={mouthD}
             fill={mouthFillColor}
-            stroke={colors.outline}
-            strokeWidth={3}
+            stroke={colors.black}
+            strokeWidth={3.5}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
