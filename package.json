@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "trace": "node scripts/trace/trace.mjs",
+    "trace": "node scripts/trace/preprocess.mjs && node scripts/trace/trace.mjs",
     "trace:layer": "node scripts/trace/layer.mjs"
   },
   "dependencies": {

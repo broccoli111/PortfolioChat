@@ -20,15 +20,19 @@ import sharp from "sharp";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..", "..");
 
-const IN_PNG = path.join(root, "reference/avatar.png");
+const IN_PNG_RAW = path.join(root, "reference/avatar.png");
+const IN_PNG_CLEAN = path.join(root, "reference/avatar-clean.png");
 const OUT_RAW = path.join(root, "reference/traced-raw.svg");
 const OUT_COMPARE = path.join(root, "reference/compare.png");
 
-if (!fs.existsSync(IN_PNG)) {
-  console.error(`[trace] missing input: ${IN_PNG}`);
+if (!fs.existsSync(IN_PNG_RAW)) {
+  console.error(`[trace] missing input: ${IN_PNG_RAW}`);
   console.error(`[trace] drop the reference PNG at that path and re-run.`);
   process.exit(1);
 }
+
+// Prefer the preprocessed, background-flattened image when present.
+const IN_PNG = fs.existsSync(IN_PNG_CLEAN) ? IN_PNG_CLEAN : IN_PNG_RAW;
 
 /** Resolve the vtracer binary. We first check the cargo bin and then PATH. */
 function resolveVtracer() {
@@ -72,9 +76,10 @@ async function main() {
     "--output", OUT_RAW,
     "--colormode", "color",
     "--mode", "spline",
-    "--filter_speckle", "6",
+    "--hierarchical", "stacked",
+    "--filter_speckle", "8",
     "--color_precision", "6",
-    "--layer_difference", "16",
+    "--gradient_step", "16",
     "--corner_threshold", "60",
     "--segment_length", "4",
     "--splice_threshold", "45",
