@@ -1,7 +1,9 @@
-export { TalkingHeadAvatar, default } from "./TalkingHeadAvatar";
+export { TalkingHeadAvatar } from "./TalkingHeadAvatar";
 export type { TalkingHeadAvatarProps } from "./TalkingHeadAvatar";
 export { TracedAvatar } from "./TracedAvatar";
 export type { TracedAvatarProps } from "./TracedAvatar";
+export { CombinedAvatar, default } from "./CombinedAvatar";
+export type { CombinedAvatarProps } from "./CombinedAvatar";
 export type {
   AvatarEmotion,
   AvatarMouthShape,

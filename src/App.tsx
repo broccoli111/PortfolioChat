@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  CombinedAvatar,
   TalkingHeadAvatar,
   TracedAvatar,
   mapConversationToAvatarState,
@@ -8,7 +9,7 @@ import {
 } from "./avatar";
 import "./App.css";
 
-type AvatarMode = "traced" | "animated";
+type AvatarMode = "combined" | "traced" | "animated";
 
 const EMOTIONS: AvatarEmotion[] = [
   "neutral",
@@ -20,7 +21,7 @@ const EMOTIONS: AvatarEmotion[] = [
 ];
 
 export default function App() {
-  const [mode, setMode] = useState<AvatarMode>("traced");
+  const [mode, setMode] = useState<AvatarMode>("combined");
   const [emotion, setEmotion] = useState<AvatarEmotion>("neutral");
   const [speaking, setSpeaking] = useState(false);
   const [intensity, setIntensity] = useState(1);
@@ -59,7 +60,9 @@ export default function App() {
 
       <main className="stage-wrap">
         <div className="stage" style={{ width: size + 48, height: size + 48 }}>
-          {mode === "traced" ? (
+          {mode === "combined" ? (
+            <CombinedAvatar {...state} />
+          ) : mode === "traced" ? (
             <TracedAvatar size={size} />
           ) : (
             <TalkingHeadAvatar {...state} />
@@ -72,7 +75,8 @@ export default function App() {
           <label className="row">
             <span>Render mode</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as AvatarMode)}>
-              <option value="traced">traced (reference portrait)</option>
+              <option value="combined">combined (traced + animated)</option>
+              <option value="traced">traced (static reference)</option>
               <option value="animated">animated (parametric)</option>
             </select>
           </label>
