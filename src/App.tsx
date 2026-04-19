@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import {
   TalkingHeadAvatar,
+  TracedAvatar,
   mapConversationToAvatarState,
   type AvatarEmotion,
   type AvatarState,
 } from "./avatar";
 import "./App.css";
+
+type AvatarMode = "traced" | "animated";
 
 const EMOTIONS: AvatarEmotion[] = [
   "neutral",
@@ -17,6 +20,7 @@ const EMOTIONS: AvatarEmotion[] = [
 ];
 
 export default function App() {
+  const [mode, setMode] = useState<AvatarMode>("traced");
   const [emotion, setEmotion] = useState<AvatarEmotion>("neutral");
   const [speaking, setSpeaking] = useState(false);
   const [intensity, setIntensity] = useState(1);
@@ -55,11 +59,23 @@ export default function App() {
 
       <main className="stage-wrap">
         <div className="stage" style={{ width: size + 48, height: size + 48 }}>
-          <TalkingHeadAvatar {...state} />
+          {mode === "traced" ? (
+            <TracedAvatar size={size} />
+          ) : (
+            <TalkingHeadAvatar {...state} />
+          )}
         </div>
 
         <section className="controls" aria-label="Avatar controls">
           <h2>Controls</h2>
+
+          <label className="row">
+            <span>Render mode</span>
+            <select value={mode} onChange={(e) => setMode(e.target.value as AvatarMode)}>
+              <option value="traced">traced (reference portrait)</option>
+              <option value="animated">animated (parametric)</option>
+            </select>
+          </label>
 
           <label className="row">
             <span>Emotion</span>
