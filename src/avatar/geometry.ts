@@ -1,230 +1,252 @@
 /**
  * Geometry / path helpers for the TalkingHeadAvatar.
  *
- * Everything is authored against a fixed 256x256 viewBox so the SVG scales
- * crisply to any rendered pixel size. All shapes are computed in code — no
- * raster assets, no sprite sheets, no external avatar services.
+ * All shapes are authored against a fixed 256x256 viewBox so the SVG scales
+ * crisply at any rendered size. Nothing here uses raster assets, sprite
+ * sheets, or external services — every silhouette is a hand-authored
+ * cubic/quadratic SVG path or computed primitive.
  *
- * ART DIRECTION
- * -------------
- * Stylized sticker/badge portrait: thick black outer contour, cream face,
- * charcoal hair with a single lighter highlight block, medium-gray beard,
- * oversized amber rectangular glasses, big vertical pupils, thick rounded
- * brows, soft orange glow halo.
+ * ART DIRECTION (from reference)
+ * ------------------------------
+ * Stylized sticker/badge portrait with:
+ *   - thick amber "toon-force" outer contour (not black)
+ *   - cream face fill
+ *   - charcoal hair with a spiky/tufted top edge and a lighter side fade
+ *   - medium-gray chin-strap style beard (clean mustache zone, soul patch)
+ *   - oversized amber rectangular glasses with tiny hinge dots
+ *   - huge round black pupils filling most of the lens, with amber catch-light
+ *   - small upturned smirk at rest
+ *   - soft warm orange halo behind everything
+ *   - slight 3/4 turn (ear visible on viewer-right, features biased a hair
+ *     left of center)
  *
- * 3/4 TURN
- * --------
- * The head is baked into a slight 3/4 pose rather than rotating the SVG:
- *   - facial mass biased a touch to the viewer's left
- *   - oversized ear on the viewer's right (the far side)
- *   - jaw and beard taper slightly toward the far side
- *   - near-side (left) glasses lens is a touch larger than the far-side lens
- *   - near-side eye is a touch larger than the far-side eye
- *
- * All shapes are expressed as a few large, confident cubic/quadratic paths.
- * No noisy detail lines — every internal feature is a filled silhouette or
- * a thick rounded stroke so the avatar stays readable at small sizes.
+ * Everything is a filled shape or a thick rounded stroke — no hairlines
+ * that would disappear at small sizes.
  */
 
 export const VIEWBOX = 256;
 
 /**
- * Anchor points used by all features. 3/4 facing is baked into these:
- * near-side features sit slightly left of center and are slightly larger;
- * the far-side ear sits off to the viewer-right.
+ * Anchor points used by all features. The 3/4 turn is subtle here — the
+ * reference pose is nearly front-on with just a slight lean. Features sit
+ * close to symmetric; the ear lives on the viewer-right.
  */
 export const GEOMETRY = {
-  /** Head silhouette bounds (purely informational — path is authored below). */
-  head: { cx: 122, cy: 132 },
+  /** Head silhouette center (informational — path authored below). */
+  head: { cx: 128, cy: 136 },
 
-  /** Oversized far-side ear on viewer-right.
-   *  Positioned well outside the head silhouette so the ear reads clearly
-   *  at small sizes. The near-side of the ear "attaches" to the head at the
-   *  cheekbone line. */
-  ear: { cx: 220, cy: 144, rx: 16, ry: 24 },
+  /** Far-side ear (viewer-right). Small, with an inner whorl. */
+  ear: { cx: 210, cy: 146, rx: 10, ry: 16 },
 
-  /** Eyes — near-side (L) slightly larger than far-side (R). */
-  eyeL: { cx: 93, cy: 122, rx: 15, ry: 18 },
-  eyeR: { cx: 152, cy: 120, rx: 12, ry: 16 },
+  /** Eyes — nearly symmetric, sized to fit inside the glasses lenses. */
+  eyeL: { cx: 100, cy: 130, rx: 16, ry: 17 },
+  eyeR: { cx: 156, cy: 130, rx: 16, ry: 17 },
 
-  /** Glasses lenses — rounded rects with mild 3/4 scaling difference. */
-  glassL: { x: 70, y: 100, w: 50, h: 44, r: 12 },
-  glassR: { x: 132, y: 102, w: 44, h: 40, r: 11 },
-  glassBridgeY: 120,
+  /**
+   * Glasses lenses — rounded rectangles, nearly symmetric. Slightly taller
+   * than they are wide for the rectangular amber look.
+   */
+  glassL: { x: 78, y: 108, w: 46, h: 46, r: 12 },
+  glassR: { x: 132, y: 108, w: 46, h: 46, r: 12 },
+  glassBridgeY: 128,
 
-  /** Brows — near-side brow is wider. */
-  browL: { cx: 93, cy: 92, w: 42 },
-  browR: { cx: 152, cy: 90, w: 34 },
+  /** Brows — kept mostly hidden behind the hair/glasses but available for
+   *  expression. Small anchors just below the hairline. */
+  browL: { cx: 100, cy: 100, w: 30 },
+  browR: { cx: 156, cy: 100, w: 30 },
 
-  /** Mouth anchor. */
-  mouth: { cx: 120, cy: 200, w: 32 },
+  /** Mouth anchor — sits in the skin window framed by the beard band. */
+  mouth: { cx: 128, cy: 178, w: 26 },
 } as const;
 
-// ---------- Primary silhouettes ------------------------------------------
+// ---------- Head silhouette ---------------------------------------------
 
 /**
- * Head silhouette — a bold, asymmetric sticker shape.
- *
- * Key traits:
- *   - rounded skull dome up top
- *   - far-side (right) cheek bulges out to make room for the ear
- *   - near-side (left) jaw is a touch squarer than far-side
- *   - chin sits slightly left of geometric center (3/4 tilt)
- *
- * Authored as one continuous cubic bezier path going clockwise from the
- * top-center of the head.
+ * Head: a compact, slightly-squarish sticker shape. Wide at the temples,
+ * rounded jawline, short chin. A touch asymmetric — near-side is a hair
+ * fuller — but mostly reads as a friendly front-ish portrait.
  */
 export function headSilhouettePath(): string {
-  // Single continuous curve going clockwise from the top center. Control
-  // points are chosen so tangents match between segments (smooth joins) —
-  // no visible flats or corners on the silhouette.
   return [
-    "M 120 40",
-    // Top skull -> far-side temple
-    "C 156 38, 184 50, 196 76",
-    // Far-side temple -> cheekbone. Narrower bulge so the ear has clear
-    // room to protrude past the silhouette.
-    "C 204 100, 206 124, 202 144",
-    // Cheekbone -> far-side jaw (taper inward because the face is turning away)
-    "C 196 172, 184 196, 164 212",
-    // Far-side jaw -> chin (chin slightly left of geometric center)
-    "C 150 222, 134 226, 118 224",
+    "M 128 44",
+    // Top-right of skull -> far-side temple
+    "C 160 42, 188 52, 200 78",
+    // Far-side temple -> cheekbone bulge (the ear attaches here)
+    "C 208 100, 210 124, 206 150",
+    // Cheekbone -> far-side jaw (rounded, not angular)
+    "C 202 180, 186 204, 160 216",
+    // Far-side jaw -> chin
+    "C 146 222, 134 224, 124 224",
     // Chin -> near-side jaw
-    "C 100 222, 80 212, 64 194",
-    // Near-side jaw -> near-side cheekbone (fuller on the near side)
-    "C 50 176, 42 152, 42 126",
+    "C 112 224, 98 220, 82 212",
+    // Near-side jaw -> near-side cheekbone
+    "C 60 196, 48 172, 46 148",
     // Near-side cheekbone -> near-side temple
-    "C 44 94, 56 68, 80 52",
+    "C 44 120, 52 92, 68 72",
     // Near-side temple back across the top
-    "C 94 44, 106 40, 120 40",
+    "C 84 52, 106 44, 128 44",
     "Z",
   ].join(" ");
 }
 
+// ---------- Hair ---------------------------------------------------------
+
 /**
- * Hair silhouette — a short close-cropped cap hugging the skull.
- *
- * Finishes in a clean forehead line (slight dip in the middle) rather than
- * trying to render individual strands. Sides wrap down to the temples so
- * they read as sideburn transitions into the beard.
+ * Main hair mass. Covers the top of the skull with a textured top edge
+ * (produced by hairSpikesPath, drawn on top) and wraps down the sides as
+ * sideburns that meet the beard.
  */
 export function hairMainPath(): string {
+  // Single continuous mass covering the top of the skull and wrapping down
+  // both temples to the sideburn attach points. The forehead hairline is
+  // GENTLE — a very shallow dip so there's no visible skin hole under the
+  // spikes, and the hair meets the beard sideburns cleanly at y~140.
   return [
-    "M 44 106",
-    // near-side temple up over the skull dome
-    "C 44 72 60 48 92 42",
-    "C 120 38 156 40 180 54",
-    "C 200 66 210 90 212 116",
-    // forehead line: step in from the far-side temple...
-    "C 206 114 200 112 196 112",
-    // gentle forehead dip in the center
-    "C 190 96 170 88 144 88",
-    "C 124 88 108 94 96 104",
-    // back across near-side temple to start
-    "C 80 108 62 108 50 106",
-    "C 48 106 46 106 44 106",
+    // Near-side sideburn tip (meets the beard)
+    "M 48 144",
+    // Up the near-side temple
+    "C 44 114, 52 82, 68 66",
+    // Across the top of the skull
+    "C 92 48, 164 48, 188 66",
+    // Down the far-side temple
+    "C 204 82, 212 114, 208 144",
+    // Far-side sideburn tip (meets the beard)
+    "C 204 146, 200 146, 196 144",
+    // Hairline inside the forehead — a single smooth shallow arc from
+    // far-side temple to near-side temple with just a whisper of a
+    // widow's-peak at the center.
+    "C 196 108, 178 94, 128 98",
+    "C 78 94, 60 108, 60 144",
+    // Close back to near-side sideburn
+    "C 56 146, 52 146, 48 144",
     "Z",
   ].join(" ");
 }
 
 /**
- * Hair highlight — a single lighter block on the upper near-side of the
- * skull (catches imaginary light from the left). Kept as one simple shape
- * so the "toon-force" feel reads clean at small sizes.
+ * Spiky top edge — a row of small triangular tufts along the skull dome
+ * that sell the "buzz cut with slight texture" look. Drawn as a filled
+ * path in the same dark color as the main hair, sitting on top of the
+ * main hair shape so it protrudes past the smooth upper contour.
+ */
+export function hairSpikesPath(): string {
+  // Subtle row of small tufts across the top of the skull. Peaks rise only
+  // 4-6 units above the smooth hairline to suggest "short textured cut"
+  // rather than spiky anime hair.
+  const peaks: Array<[number, number]> = [
+    [74, 66],
+    [80, 58],
+    [88, 62],
+    [96, 56],
+    [106, 60],
+    [116, 54],
+    [126, 58],
+    [136, 52],
+    [146, 56],
+    [156, 54],
+    [166, 60],
+    [176, 58],
+    [186, 64],
+  ];
+  const left = "M 70 72";
+  const right = "L 190 72";
+  const line = peaks.map(([x, y]) => `L ${x} ${y}`).join(" ");
+  return [left, line, right, "L 190 80", "L 70 80", "Z"].join(" ");
+}
+
+/**
+ * Hair highlight / fade block — a lighter shape on the near-side of the
+ * head that reads as a side fade / highlight. Matches the reference's
+ * lighter gray band running down the viewer-left temple.
  */
 export function hairHighlightPath(): string {
-  // Lighter block sits on the upper-near-side of the skull dome (catches
-  // imaginary light from the upper-left). Elongated shape that follows the
-  // curve of the skull so it reads as a stylized highlight rather than a blob.
   return [
-    "M 66 52",
-    "C 82 44 100 44 114 48",
-    // Inner edge curving down across the top of the skull
-    "C 112 62 100 74 82 78",
-    // Lower edge back toward temple
-    "C 72 76 64 68 62 60",
-    "C 62 56 64 54 66 52",
+    // Top at the near-side temple
+    "M 56 80",
+    "C 52 104, 52 126, 58 140",
+    // Bottom curves around the near-side sideburn
+    "C 62 140, 66 138, 70 134",
+    // Inner edge back up into the skull
+    "C 68 114, 70 96, 78 80",
+    "C 72 78, 62 78, 56 80",
     "Z",
   ].join(" ");
 }
 
+// ---------- Beard --------------------------------------------------------
+
 /**
- * Beard silhouette — tidy trimmed beard covering cheek, jaw, and chin.
+ * Beard: chin-strap style.
  *
- * Tapers slightly toward the far side (the face is turning away), and is
- * fuller on the near side. Subtle notches at the cheek transition keep it
- * from reading as a flat slab.
+ * Follows the jaw line from sideburn to sideburn, staying relatively thin
+ * along the cheek and thickening under the chin. The mustache region is
+ * INTENTIONALLY empty — the reference shows a clean upper lip with just a
+ * short soul-patch strip below the mouth.
  */
 export function beardPath(): string {
-  // Beard: a single kidney-bean mass covering sideburns, cheeks, jaw, and
-  // chin. The TOP edge is nearly horizontal (with a small cheekbone curve
-  // and a gentle lift where it meets the mustache) so it never reads as a
-  // smile. The mustache is drawn as its own shape on top. The mouth sits on
-  // top of the beard-colored area.
+  // Chin-strap style beard covering the jaw from sideburn to sideburn.
+  // The inner edge is a smooth arch that rises high across the cheekbones
+  // and dips just slightly around the mouth — leaving a clear skin
+  // "window" framing the mouth and upper chin.
   return [
-    // Near-side sideburn (high on cheek, under the glasses)
-    "M 48 160",
-    // Top edge curving across the near cheek — gentle dip toward the
-    // upper-lip area
-    "C 58 172 76 178 92 180",
-    // Small arch under the nose (where the mustache will overlap)
-    "C 110 178 138 178 156 180",
-    // Top edge across the far cheek, tapering up to far-side sideburn
-    "C 172 178 188 172 200 158",
-    // Far-side jaw line — tapered because the face is turning away
-    "C 200 188 186 212 160 222",
-    // Chin (slightly left of geometric center to sell the 3/4 tilt)
-    "C 140 228 118 228 100 222",
-    // Near-side jaw line back up to sideburn (fuller on the near side)
-    "C 70 212 54 188 48 160",
+    // --- Outer edge: near-side sideburn down, under chin, up far side ---
+    "M 48 142",
+    "C 50 172, 66 206, 90 218",
+    "C 110 226, 146 226, 166 218",
+    "C 190 206, 206 172, 208 142",
+    // Far-side sideburn meets inner edge
+    "C 206 150, 202 154, 200 158",
+    // --- Inner edge: a single smooth arc from far-side sideburn across
+    //    to near-side sideburn. Dips down in the center to make the skin
+    //    window for the mouth. ---
+    "C 190 178, 160 196, 128 196",
+    "C 96 196, 66 178, 56 158",
+    "C 54 154, 50 150, 48 142",
     "Z",
   ].join(" ");
 }
 
 /**
- * Mustache — ties the beard into the upper lip. Sits as its own shape over
- * the beard mass so it reads as a defined feature, not a dark smudge.
+ * Soul patch — a small dark strip just below the lower lip. Tiny, but an
+ * important identity detail in the reference.
  */
-export function mustachePath(): string {
-  // Thin, wide, slightly lopsided mustache sitting just below the nose and
-  // above the mouth. Kept subtle — it's a tidy trimmed style.
+export function soulPatchPath(): string {
+  // Small darker patch of hair just below the lower lip.
+  const { cx, cy } = GEOMETRY.mouth;
+  const top = cy + 8;
   return [
-    "M 92 178",
-    "C 104 184 116 186 122 186",
-    "C 132 186 144 184 154 178",
-    "C 152 186 140 190 122 190",
-    "C 106 190 94 186 92 178",
+    `M ${cx - 6} ${top}`,
+    `C ${cx - 4} ${top + 8}, ${cx + 4} ${top + 8}, ${cx + 6} ${top}`,
+    `C ${cx + 3} ${top + 1}, ${cx - 3} ${top + 1}, ${cx - 6} ${top}`,
     "Z",
   ].join(" ");
 }
 
+// ---------- Ear ----------------------------------------------------------
+
 /**
- * Ear — oversized so it reads clearly at small sizes. Contains one simple
- * inner-fold detail rendered separately (see earInnerPath).
+ * Ear — small rounded shape attached to the far-side cheek, partly visible
+ * past the head silhouette. The ear has its own inner whorl detail.
  */
 export function earPath(): string {
   const { cx, cy, rx, ry } = GEOMETRY.ear;
-  // A rounded C-shape that bulges out to the right and tucks back to the
-  // head on the left. The inner (left) edge overlaps the head silhouette a
-  // few units so there's no visible seam.
-  const attachTop = cx - rx + 2;
-  const attachBottom = cx - rx + 2;
   return [
-    `M ${attachTop} ${cy - ry + 2}`,
-    // Outer arc: up-right around the top, then down-right around the bottom
-    `C ${cx + rx + 2} ${cy - ry + 6}, ${cx + rx + 2} ${cy + ry - 6}, ${attachBottom} ${cy + ry - 2}`,
-    // Inner edge tucking back
-    `C ${cx - rx - 2} ${cy + ry - 10}, ${cx - rx - 2} ${cy - ry + 10}, ${attachTop} ${cy - ry + 2}`,
+    // Start near the top of the attach point (inside the head outline)
+    `M ${cx - rx + 2} ${cy - ry + 2}`,
+    // Outer arc bulging right, then curving down
+    `C ${cx + rx + 2} ${cy - ry + 4}, ${cx + rx + 2} ${cy + ry - 4}, ${cx - rx + 2} ${cy + ry - 2}`,
+    // Inner edge tucking back to the head
+    `C ${cx - rx - 2} ${cy + ry - 10}, ${cx - rx - 2} ${cy - ry + 10}, ${cx - rx + 2} ${cy - ry + 2}`,
     "Z",
   ].join(" ");
 }
 
-/** Single inner-fold detail inside the ear — just enough shape to read. */
+/** Inner whorl detail — a simple C-curve inside the ear. */
 export function earInnerPath(): string {
   const { cx, cy, rx, ry } = GEOMETRY.ear;
   return [
-    `M ${cx - rx * 0.2} ${cy - ry * 0.4}`,
-    `C ${cx + rx * 0.35} ${cy - ry * 0.2}, ${cx + rx * 0.35} ${cy + ry * 0.3}, ${cx - rx * 0.1} ${cy + ry * 0.55}`,
+    `M ${cx + rx * 0.2} ${cy - ry * 0.4}`,
+    `C ${cx + rx * 0.6} ${cy - ry * 0.2}, ${cx + rx * 0.6} ${cy + ry * 0.3}, ${cx + rx * 0.1} ${cy + ry * 0.5}`,
   ].join(" ");
 }
 
@@ -232,8 +254,11 @@ export function earInnerPath(): string {
 
 /**
  * Mouth path generator. `shape` controls the base silhouette; `openAmount`
- * (0..1) widens/opens variants when speaking. All mouths respect the same
- * anchor so there's no positional pop when switching presets.
+ * (0..1) widens/opens variants when speaking. Every mouth respects the
+ * same anchor so switching between presets doesn't pop.
+ *
+ * The default "closed" shape is a small upturned smirk to match the
+ * reference pose.
  */
 export function mouthPath(shape: string, openAmount: number): string {
   const { cx, cy, w } = GEOMETRY.mouth;
@@ -241,13 +266,13 @@ export function mouthPath(shape: string, openAmount: number): string {
 
   switch (shape) {
     case "closed": {
-      // A short, slightly bowed line — but filled as a thin lozenge so it
-      // reads clearly against the beard's gray tone.
+      // Small upturned smirk — slightly lifted at the corners, dips through
+      // the middle. Drawn as a thin filled lozenge so it reads clearly.
       const half = w / 2;
       return [
         `M ${cx - half} ${cy}`,
-        `Q ${cx} ${cy + 3}, ${cx + half} ${cy}`,
-        `Q ${cx} ${cy - 1}, ${cx - half} ${cy}`,
+        `Q ${cx} ${cy + 3.5}, ${cx + half} ${cy}`,
+        `Q ${cx} ${cy + 1.5}, ${cx - half} ${cy}`,
         "Z",
       ].join(" ");
     }
@@ -256,7 +281,7 @@ export function mouthPath(shape: string, openAmount: number): string {
       return `M ${cx - half} ${cy} L ${cx + half} ${cy}`;
     }
     case "small": {
-      const half = 7;
+      const half = 6;
       return `M ${cx - half} ${cy} Q ${cx} ${cy + 1.8}, ${cx + half} ${cy}`;
     }
     case "smile": {
@@ -265,12 +290,12 @@ export function mouthPath(shape: string, openAmount: number): string {
       return `M ${cx - half} ${cy - 2} Q ${cx} ${cy + dip}, ${cx + half} ${cy - 2}`;
     }
     case "mid": {
-      const half = w / 2 - 2;
+      const half = w / 2 - 1;
       const h = 3 + o * 3;
       return `M ${cx - half} ${cy - h / 2} Q ${cx} ${cy + h}, ${cx + half} ${cy - h / 2} Q ${cx} ${cy - h / 2}, ${cx - half} ${cy - h / 2} Z`;
     }
     case "open": {
-      const half = w / 2 - 1;
+      const half = w / 2;
       const h = 6 + o * 8;
       return `M ${cx - half} ${cy - h / 2} Q ${cx} ${cy + h}, ${cx + half} ${cy - h / 2} Q ${cx} ${cy - h * 0.9}, ${cx - half} ${cy - h / 2} Z`;
     }
@@ -289,13 +314,11 @@ export function mouthPath(shape: string, openAmount: number): string {
 // ---------- Brows --------------------------------------------------------
 
 /**
- * Compute a brow path (thick rounded stroke) from an anchor, angle in degrees,
- * and a vertical offset.
+ * Compute a brow path (thick rounded stroke) from an anchor, angle in
+ * degrees, and a vertical offset.
  *
- * Angle convention: positive = outer edge UP (surprised / raised).
- * Negative = outer edge DOWN (angry / skeptical).
- *
- * `isLeft` indicates the viewer-left (near-side) brow.
+ * Positive angle = outer edge UP (surprised / raised).
+ * Negative angle = outer edge DOWN (angry / skeptical).
  */
 export function browPath(
   anchor: { cx: number; cy: number; w: number },
@@ -314,26 +337,20 @@ export function browPath(
   const outerY = y - tilt;
   const innerY = y + tilt * 0.25;
 
-  // Arched control point — keeps brows feeling like rounded shapes rather
-  // than straight segments.
   const ctrlX = cx;
   const ctrlY = (innerY + outerY) / 2 - 3;
 
   return `M ${innerX} ${innerY} Q ${ctrlX} ${ctrlY}, ${outerX} ${outerY}`;
 }
 
-// ---------- Lens highlight -----------------------------------------------
+// ---------- Lens highlight ----------------------------------------------
 
-/**
- * Subtle diagonal streak across a glasses lens — sells "lens" without adding
- * noise. Rendered as a thin semi-transparent path on top of the amber rim.
- */
+/** Tiny diagonal glint across the upper-left of a lens. */
 export function lensHighlightPath(lens: { x: number; y: number; w: number; h: number }): string {
   const { x, y, w, h } = lens;
-  // Short diagonal line inside the upper-left of the lens.
   const x1 = x + w * 0.18;
   const y1 = y + h * 0.2;
-  const x2 = x + w * 0.38;
-  const y2 = y + h * 0.55;
+  const x2 = x + w * 0.36;
+  const y2 = y + h * 0.5;
   return `M ${x1} ${y1} L ${x2} ${y2}`;
 }
