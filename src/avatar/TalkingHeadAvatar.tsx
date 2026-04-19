@@ -14,10 +14,12 @@ import {
   VIEWBOX,
   beardPath,
   browPath,
+  earInnerPath,
   earPath,
   hairHighlightPath,
   hairMainPath,
   headSilhouettePath,
+  lensHighlightPath,
   mouthPath,
   mustachePath,
 } from "./geometry";
@@ -307,40 +309,59 @@ export function TalkingHeadAvatar(props: TalkingHeadAvatarProps) {
         </clipPath>
       </defs>
 
-      {/* 1. glow */}
+      {/* 1. glow — soft warm halo behind the whole head */}
       <g opacity={glowOpacity}>
-        <circle cx={128} cy={130} r={116} fill="url(#avatar-glow)" />
+        <circle cx={128} cy={132} r={120} fill="url(#avatar-glow)" />
       </g>
 
       {/* Whole-head transform for idle bob */}
       <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
-        {/* 2. head silhouette (stroke first under fill for chunky outline) */}
+        {/* 6. ear — drawn FIRST so the head silhouette's outline crosses over
+            its inner edge, giving it a clean "attached" look. */}
+        <g>
+          <path
+            d={earPath()}
+            fill={colors.face}
+            stroke={colors.outline}
+            strokeWidth={5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          <path
+            d={earInnerPath()}
+            fill="none"
+            stroke={colors.outline}
+            strokeWidth={3}
+            strokeLinecap="round"
+            opacity={0.85}
+          />
+        </g>
+
+        {/* 2. head silhouette — heavy sticker contour (cream fill + thick black stroke) */}
         <path
           d={headSilhouettePath()}
           fill={colors.face}
           stroke={colors.outline}
-          strokeWidth={4}
+          strokeWidth={6}
           strokeLinejoin="round"
+          strokeLinecap="round"
         />
 
-        {/* 6. ear (behind hair so hair can overlap a touch) */}
-        <path
-          d={earPath()}
-          fill={colors.face}
-          stroke={colors.outline}
-          strokeWidth={3.5}
-          strokeLinejoin="round"
-        />
-
-        {/* Clip remaining face features to the head silhouette so hair/beard
-            never poke outside. */}
+        {/* Clip hair, beard, and mustache to the head silhouette so their
+            bold shapes never poke outside the outer contour. */}
         <g clipPath="url(#avatar-face-clip)">
-          {/* 3. face fill is already drawn via head silhouette */}
-
           {/* 4. hair */}
           <g>
-            <path d={hairMainPath()} fill={colors.hairDark} stroke={colors.outline} strokeWidth={3} strokeLinejoin="round" />
-            <path d={hairHighlightPath()} fill={colors.hairLight} opacity={0.85} />
+            <path
+              d={hairMainPath()}
+              fill={colors.hairDark}
+              stroke={colors.outline}
+              strokeWidth={4}
+              strokeLinejoin="round"
+            />
+            {/* single lighter highlight block — no additional stroke, just a
+                soft lighter patch to imply volume */}
+            <path d={hairHighlightPath()} fill={colors.hairLight} opacity={0.9} />
           </g>
 
           {/* 5. beard */}
@@ -349,21 +370,26 @@ export function TalkingHeadAvatar(props: TalkingHeadAvatarProps) {
               d={beardPath()}
               fill={colors.beard}
               stroke={colors.outline}
-              strokeWidth={3}
+              strokeWidth={3.5}
               strokeLinejoin="round"
-              opacity={0.95}
             />
-            <path d={mustachePath()} fill={colors.beard} stroke={colors.outline} strokeWidth={2.5} strokeLinejoin="round" />
+            <path
+              d={mustachePath()}
+              fill={colors.beard}
+              stroke={colors.outline}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+            />
           </g>
         </g>
 
-        {/* 7. glasses — drawn above skin so they read strongly */}
+        {/* 7. glasses — oversized amber rims, drawn above skin/beard */}
         <Glasses colors={colors} />
 
-        {/* 9. eyes — inside lens (drawn after glasses so lens tint sits behind eyes) */}
+        {/* 9. eye whites — tucked inside the lenses */}
         <Eyes params={effective} colors={colors} />
 
-        {/* 10. pupils */}
+        {/* 10. pupils — tall vertical ovals */}
         <Pupils
           dx={pupilDX}
           dy={pupilDY}
@@ -372,11 +398,17 @@ export function TalkingHeadAvatar(props: TalkingHeadAvatarProps) {
           colors={colors}
         />
 
-        {/* 8. eyebrows — on top of glasses bridge so they always read */}
+        {/* 8. eyebrows — sit above the lenses, thick + rounded for readability */}
         <Brows params={effective} colors={colors} />
 
         {/* 11. mouth */}
         <Mouth shape={mouthShape} openAmount={mouthOpen} colors={colors} />
+
+        {/* 12. subtle lens highlights (optional detail — thin diagonal streak) */}
+        <g stroke={colors.eyeWhite} strokeWidth={1.6} strokeLinecap="round" fill="none" opacity={0.55}>
+          <path d={lensHighlightPath(GEOMETRY.glassL)} />
+          <path d={lensHighlightPath(GEOMETRY.glassR)} />
+        </g>
       </g>
     </svg>
   );
@@ -390,10 +422,11 @@ function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
   const bridgeY = GEOMETRY.glassBridgeY;
   return (
     <g>
-      {/* Lens tint */}
+      {/* Soft lens tint fill (near-invisible warm cast inside the lens) */}
       <rect x={gL.x} y={gL.y} width={gL.w} height={gL.h} rx={gL.r} ry={gL.r} fill={colors.glassesLens} />
       <rect x={gR.x} y={gR.y} width={gR.w} height={gR.h} rx={gR.r} ry={gR.r} fill={colors.glassesLens} />
-      {/* Rims */}
+
+      {/* Amber rims — heavy chunky strokes */}
       <rect
         x={gL.x}
         y={gL.y}
@@ -403,7 +436,7 @@ function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
         ry={gL.r}
         fill="none"
         stroke={colors.glasses}
-        strokeWidth={4.5}
+        strokeWidth={6}
       />
       <rect
         x={gR.x}
@@ -414,9 +447,10 @@ function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
         ry={gR.r}
         fill="none"
         stroke={colors.glasses}
-        strokeWidth={4.5}
+        strokeWidth={6}
       />
-      {/* Inner rim outline (black) for chunky contrast */}
+
+      {/* Fine dark inner contour on the rims — sells the sticker outline feel */}
       <rect
         x={gL.x}
         y={gL.y}
@@ -426,7 +460,7 @@ function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
         ry={gL.r}
         fill="none"
         stroke={colors.outline}
-        strokeWidth={1.4}
+        strokeWidth={1.8}
       />
       <rect
         x={gR.x}
@@ -437,13 +471,40 @@ function Glasses({ colors }: { colors: Required<AvatarPalette> }) {
         ry={gR.r}
         fill="none"
         stroke={colors.outline}
-        strokeWidth={1.4}
+        strokeWidth={1.8}
       />
-      {/* Bridge */}
-      <line x1={gL.x + gL.w} y1={bridgeY} x2={gR.x} y2={bridgeY} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
-      {/* Temples (side arms) peeking to the edges */}
-      <line x1={gR.x + gR.w} y1={gR.y + gR.h * 0.4} x2={gR.x + gR.w + 18} y2={gR.y + gR.h * 0.35} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
-      <line x1={gL.x} y1={gL.y + gL.h * 0.4} x2={gL.x - 16} y2={gL.y + gL.h * 0.35} stroke={colors.glasses} strokeWidth={4.5} strokeLinecap="round" />
+
+      {/* Bridge — tilts down a touch to the far side to suggest 3/4 perspective */}
+      <line
+        x1={gL.x + gL.w}
+        y1={bridgeY}
+        x2={gR.x}
+        y2={bridgeY + 2}
+        stroke={colors.glasses}
+        strokeWidth={6}
+        strokeLinecap="round"
+      />
+
+      {/* Temples: the near-side temple is short (disappears behind the
+          viewer's side of the head); the far-side temple runs toward the ear. */}
+      <line
+        x1={gR.x + gR.w}
+        y1={gR.y + gR.h * 0.38}
+        x2={GEOMETRY.ear.cx - 10}
+        y2={GEOMETRY.ear.cy - 8}
+        stroke={colors.glasses}
+        strokeWidth={5.5}
+        strokeLinecap="round"
+      />
+      <line
+        x1={gL.x}
+        y1={gL.y + gL.h * 0.42}
+        x2={gL.x - 10}
+        y2={gL.y + gL.h * 0.38}
+        stroke={colors.glasses}
+        strokeWidth={5.5}
+        strokeLinecap="round"
+      />
     </g>
   );
 }
@@ -457,8 +518,8 @@ function Eyes({ params, colors }: { params: ExpressionParams; colors: Required<A
   const ryR = eR.ry * clamp01(params.lidOpenR);
   return (
     <g>
-      <ellipse cx={eL.cx} cy={eL.cy} rx={eL.rx} ry={ryL} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2} />
-      <ellipse cx={eR.cx} cy={eR.cy} rx={eR.rx} ry={ryR} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2} />
+      <ellipse cx={eL.cx} cy={eL.cy} rx={eL.rx} ry={ryL} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2.5} />
+      <ellipse cx={eR.cx} cy={eR.cy} rx={eR.rx} ry={ryR} fill={colors.eyeWhite} stroke={colors.outline} strokeWidth={2.5} />
     </g>
   );
 }
@@ -480,8 +541,8 @@ function Pupils({
   const eR = GEOMETRY.eyeR;
   // Pupils are tall vertical ovals. Squash with lid close so they don't
   // poke through closed lids.
-  const pRxBase = 3.2;
-  const pRyBase = 6.5;
+  const pRxBase = 3.6;
+  const pRyBase = 7.2;
   const pRyL = pRyBase * clamp01(lidOpenL);
   const pRyR = pRyBase * clamp01(lidOpenR);
   // Hide pupils entirely when lids are almost closed so blinks read clean.
@@ -513,7 +574,7 @@ function Brows({ params, colors }: { params: ExpressionParams; colors: Required<
   const dL = browPath(GEOMETRY.browL, params.browAngleL, params.browYL, true);
   const dR = browPath(GEOMETRY.browR, params.browAngleR, params.browYR, false);
   return (
-    <g fill="none" stroke={colors.outline} strokeWidth={6} strokeLinecap="round">
+    <g fill="none" stroke={colors.outline} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round">
       <path d={dL} />
       <path d={dR} />
     </g>
@@ -530,11 +591,15 @@ function Mouth({
   colors: Required<AvatarPalette>;
 }) {
   const d = mouthPath(shape, openAmount);
-  const isFilled = shape === "open" || shape === "mid";
+  // "closed" is a thin filled lozenge so it reads cleanly against the beard.
+  // "open" / "mid" are filled pill shapes (the open mouth interior).
+  // Everything else is a stroked line.
+  const filledWithMouthColor = shape === "open" || shape === "mid";
+  const filledWithOutline = shape === "closed";
   return (
     <path
       d={d}
-      fill={isFilled ? colors.mouth : "none"}
+      fill={filledWithMouthColor ? colors.mouth : filledWithOutline ? colors.outline : "none"}
       stroke={colors.outline}
       strokeWidth={3.5}
       strokeLinecap="round"
