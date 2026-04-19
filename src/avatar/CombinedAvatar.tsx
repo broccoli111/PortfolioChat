@@ -23,6 +23,7 @@ import {
   blendParams,
   clamp,
   clamp01,
+  emotionMotion,
   lerp,
   neutralParams,
   type ExpressionParams,
@@ -45,7 +46,12 @@ export type CombinedAvatarProps = AvatarState & {
 
 // ---------- Animation tuning --------------------------------------------
 
-const EXPRESSION_EASE = 6;
+/** How fast the eased parameter vector chases the target. Higher = snappier. */
+const EXPRESSION_EASE = 10;
+/** Duration of the entry-pop overshoot after an emotion change (ms). */
+const ENTRY_POP_MS = 260;
+/** Amount by which the pop briefly pushes past the target preset. */
+const ENTRY_POP_AMOUNT = 0.28;
 const IDLE_BOB_AMPLITUDE = 1.2;
 const IDLE_BOB_PERIOD_MS = 3800;
 const BLINK_MIN_INTERVAL_MS = 2200;
@@ -150,6 +156,9 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
     speakOpen: 0,
     idleDriftX: 0,
     idleDriftY: 0,
+    headTilt: 0,
+    headSwayX: 0,
+    headSwayY: 0,
   }));
 
   const target = useMemo<ExpressionParams>(() => {
@@ -162,6 +171,15 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
   useEffect(() => {
     targetRef.current = target;
   }, [target]);
+
+  // Entry-pop: brief overshoot whenever the target emotion changes so a
+  // newly-triggered expression has snap. We stamp a timestamp each time
+  // the emotion prop flips and let the rAF loop turn that into a
+  // short-lived multiplier on top of the eased value.
+  const entryPopStartRef = useRef(performance.now() - ENTRY_POP_MS);
+  useEffect(() => {
+    entryPopStartRef.current = performance.now();
+  }, [emotion]);
 
   const blinkRef = useRef<{ nextAt: number; phase: 0 | 1 | 2; phaseStart: number }>({
     nextAt: performance.now() + randomInRange(BLINK_MIN_INTERVAL_MS, BLINK_MAX_INTERVAL_MS),
@@ -267,14 +285,57 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
       const idleDriftY =
         Math.cos(driftPhase * Math.PI * 2 * 0.7) * IDLE_DRIFT_AMPLITUDE * 0.5;
 
+      // Entry-pop multiplier: 1 + sin-ease bump during the first
+      // ENTRY_POP_MS after an emotion change, then settles to 1.
+      const popPhase = clamp01((now - entryPopStartRef.current) / ENTRY_POP_MS);
+      const pop = popPhase < 1
+        ? 1 + Math.sin(popPhase * Math.PI) * ENTRY_POP_AMOUNT
+        : 1;
+
+      // Apply entry-pop as an overshoot toward the target preset from
+      // the neutral baseline. We scale the signed delta between live
+      // and neutral by (pop - 1) so the peak intensity of a new
+      // expression briefly exaggerates past the preset.
+      const em: AvatarEmotion = emotionRef.current;
+      const preset = EXPRESSION_PRESETS[em] ?? EXPRESSION_PRESETS.neutral;
+      if (pop > 1) {
+        const extra = pop - 1; // 0..ENTRY_POP_AMOUNT
+        live.browAngleL += (preset.browAngleL - live.browAngleL) * extra;
+        live.browAngleR += (preset.browAngleR - live.browAngleR) * extra;
+        live.browYL += (preset.browYL - live.browYL) * extra;
+        live.browYR += (preset.browYR - live.browYR) * extra;
+        live.lidOpenL += (preset.lidOpenL - live.lidOpenL) * extra;
+        live.lidOpenR += (preset.lidOpenR - live.lidOpenR) * extra;
+        live.pupilOffsetX += (preset.pupilOffsetX - live.pupilOffsetX) * extra;
+        live.pupilOffsetY += (preset.pupilOffsetY - live.pupilOffsetY) * extra;
+      }
+
+      // Per-emotion motion overlay (brow twitches, pupil darts, head
+      // tilts — gives each emotion a live signature).
+      const overlay = emotionMotion(em, now);
+      const outParams: ExpressionParams = {
+        ...live,
+        browAngleL: live.browAngleL + overlay.browAngleL,
+        browAngleR: live.browAngleR + overlay.browAngleR,
+        browYL: live.browYL + overlay.browYL,
+        browYR: live.browYR + overlay.browYR,
+        lidOpenL: live.lidOpenL + overlay.lidOpenL,
+        lidOpenR: live.lidOpenR + overlay.lidOpenR,
+        pupilOffsetX: live.pupilOffsetX + overlay.pupilOffsetX,
+        pupilOffsetY: live.pupilOffsetY + overlay.pupilOffsetY,
+      };
+
       setRender({
-        params: { ...live },
+        params: outParams,
         bob,
         blink: blinkAmount,
         speakShape: speakingRef.current ? s.shape : null,
         speakOpen: s.open,
         idleDriftX,
         idleDriftY,
+        headTilt: overlay.headTiltDeg,
+        headSwayX: overlay.headSwayX,
+        headSwayY: overlay.headSwayY,
       });
       raf = requestAnimationFrame(tick);
     };
@@ -359,7 +420,16 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
         overlaps the mouth region. If you want the mouth to read on top
         of the beard, swap the mouth and beard blocks.
       */}
-      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
+      {/* Head transform: idle vertical bob + per-emotion sway/tilt.
+           Rotation origin set at the head center (approx ~(128, 140)) so
+           tilts pivot around the chin-up-face axis instead of the SVG
+           corner. */}
+      <g
+        transform={
+          `translate(${render.headSwayX.toFixed(3)} ${(render.bob + render.headSwayY).toFixed(3)}) ` +
+          `rotate(${render.headTilt.toFixed(3)} 128 140)`
+        }
+      >
         {/* ---- head (face fill + outline) ---- */}
         <g id="head">
           <path d={B.faceFill} fill={colors.skin} />
