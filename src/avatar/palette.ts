@@ -1,21 +1,29 @@
 import type { AvatarPalette } from "./types";
 
 /**
- * Default colors for the "toon-force glow" look.
+ * Default colors matching the reference "toon-force glow" sticker portrait:
+ * amber contour + cream face + charcoal hair + medium-gray beard + warm
+ * orange halo.
+ *
+ * The contour is the defining sticker outline (amber), while `outline` is
+ * reserved for thin dark internal strokes (pupils/brows/mouth/eye whites).
+ *
  * Override any subset via the `palette` prop on <TalkingHeadAvatar />.
  */
 export const DEFAULT_PALETTE: Required<AvatarPalette> = {
-  outline: "#111111",
-  face: "#F6F2EA",
-  hairDark: "#2F2F33",
-  hairLight: "#8C8A84",
-  beard: "#8A8A8A",
-  glasses: "#D97A00",
-  glassesLens: "rgba(255, 200, 120, 0.18)",
-  glow: "rgba(255, 165, 0, 0.35)",
-  pupil: "#111111",
-  eyeWhite: "#FBFAF6",
-  mouth: "#2A1A14",
+  outline: "#2A1E10",
+  contour: "#F58A1F",
+  face: "#FAF1E0",
+  hairDark: "#2B2621",
+  hairLight: "#6B6158",
+  beard: "#6E645B",
+  glasses: "#F58A1F",
+  glassesLens: "rgba(255, 210, 140, 0.10)",
+  glow: "#FFAE3B",
+  pupil: "#1A1410",
+  catchLight: "#FFC760",
+  eyeWhite: "#FFFAF1",
+  mouth: "#3A1F14",
   background: "transparent",
 };
 

@@ -34,7 +34,10 @@ export type AvatarState = {
  * to the documented defaults for any value not supplied.
  */
 export type AvatarPalette = {
+  /** Thin dark inner stroke used on internal features (eyes, brows, mouth). */
   outline?: string;
+  /** Thick amber sticker contour around the whole head (the dominant outline). */
+  contour?: string;
   face?: string;
   hairDark?: string;
   hairLight?: string;
@@ -43,6 +46,8 @@ export type AvatarPalette = {
   glassesLens?: string;
   glow?: string;
   pupil?: string;
+  /** Warm catch-light spark inside each pupil. */
+  catchLight?: string;
   eyeWhite?: string;
   mouth?: string;
   background?: string;
