@@ -298,6 +298,101 @@ for (const [name, arr] of Object.entries(buckets)) {
 }
 paintOrder.sort((a, b) => a.srcIndex - b.srcIndex);
 
+// ---------- Identify animated "feature" paths ---------------------------
+//
+// The traced SVG contains baked-in dark pupils, brows, a mustache/mouth,
+// and a soul patch. To make the avatar animatable, we flag those paths so
+// the component can SKIP them and overlay animated features on top.
+//
+// Heuristics (in 1024-source-space bounds):
+//   - BROWS:       thin horizontal dark shapes sitting above the lenses
+//                  (w >> h, y in ~420-490 band)
+//   - PUPILS:      medium-tall dark shapes roughly inside lens interiors
+//                  (y in ~480-620 band, h > w)
+//   - MOUTH:       thin horizontal dark shape in the lower face
+//                  (w >> h, y in ~670-720 band)
+//   - SOUL PATCH:  small dark cluster just below the mouth band (y ~720-780)
+//
+// Everything else dark (head outline, hair, beard, ear detail, glasses
+// rim inner contour, catch-light beds) stays un-flagged so the traced
+// silhouette base is preserved intact.
+
+// Empirically measured from the last trace run (1024x1024 reference):
+const BROW_BAND = [420, 495];
+const PUPIL_BAND = [475, 640];
+const MOUTH_BAND = [670, 725];
+const SOUL_PATCH_BAND = [710, 790];
+
+// Lens horizontal ranges (approx 1024-space) — pupils must fall inside one.
+const LENS_BANDS_X = [
+  [240, 440], // near-side lens
+  [440, 660], // far-side lens
+];
+
+function tagFeature(p) {
+  if (p.cls !== "dark") return null;
+  const b = p.bounds;
+  const cy = (b.minY + b.maxY) / 2;
+  const cx = (b.minX + b.maxX) / 2;
+
+  // Very large silhouette shapes are the head contour inner line / hair
+  // and should always be kept.
+  if (b.w > 420 || b.h > 420) return null;
+
+  const ratio = b.w / Math.max(1, b.h);
+
+  // Brows — thin horizontal bar above lenses
+  if (ratio > 2.8 && cy >= BROW_BAND[0] && cy <= BROW_BAND[1]) return "brow";
+
+  // Mouth — thin horizontal bar in the lower face
+  if (ratio > 2.5 && cy >= MOUTH_BAND[0] && cy <= MOUTH_BAND[1]) return "mouth";
+
+  // Soul patch — compact dark cluster just below mouth band
+  if (cy >= SOUL_PATCH_BAND[0] && cy <= SOUL_PATCH_BAND[1] && b.w < 120 && b.h < 80) {
+    return "soulPatch";
+  }
+
+  // Pupil — tall-ish dark shape within a lens band
+  if (cy >= PUPIL_BAND[0] && cy <= PUPIL_BAND[1]) {
+    const insideLens = LENS_BANDS_X.some(([x0, x1]) => cx >= x0 && cx <= x1);
+    if (insideLens && b.h > 40 && b.h < 180 && b.w < 140) return "pupil";
+  }
+
+  return null;
+}
+
+for (const p of paintOrder) {
+  p.feature = tagFeature(p);
+}
+
+// ---------- Anchors (in 256-space) for the animated overlay -------------
+//
+// Hand-measured by overlaying red markers on the rendered traced-layered
+// SVG and visually confirming they land on the intended features. The
+// automatic pupil/brow detection was too fragile because the baked-in
+// "pupils" in the reference are actually compound shapes (pupil + dark
+// catch-light bed) that overlap the glasses frame dark rim, so their
+// bounding boxes didn't cleanly isolate.
+const anchors = {
+  eyeL:  { cx: 62,  cy: 142 },
+  eyeR:  { cx: 127, cy: 142 },
+  browL: { cx: 62,  cy: 118 },
+  browR: { cx: 127, cy: 118 },
+  mouth: { cx: 110, cy: 197 },
+};
+
+// Face-colored "erasers" painted over the traced pupils/brows/mouth
+// region before the animated features are drawn on top. These are
+// ellipses / rectangles in 256-space sized to cleanly cover the baked-in
+// dark shapes while leaving the glasses rim intact.
+const eraseRegions = {
+  // Lens interiors — wipe the traced pupils + catch-light clutter
+  lensL: { cx: 62,  cy: 145, rx: 18, ry: 19 },
+  lensR: { cx: 127, cy: 145, rx: 18, ry: 19 },
+  // Mouth area — wipe the traced smirk + mustache drop
+  mouth: { cx: 110, cy: 196, rx: 20, ry: 9 },
+};
+
 // ---------- Emit layered SVG -------------------------------------------
 
 // Document-level transform scales the visible bbox (in 1024-space) into
@@ -305,31 +400,43 @@ paintOrder.sort((a, b) => a.srcIndex - b.srcIndex);
 // translate is kept verbatim inside.
 const transformAttr = `transform="matrix(${scale} 0 0 ${scale} ${tx} ${ty})"`;
 
-function renderPaths(entries) {
+function renderPaths(entries, opts = {}) {
   if (entries.length === 0) return "";
   return entries
-    .map(
-      (e) =>
-        `    <path d="${e.d}" fill="${e.fill}"${e.transform ? ` transform="${e.transform}"` : ""} data-layer="${e.layer}"/>`,
-    )
+    .map((e) => {
+      const attrs = [
+        `d="${e.d}"`,
+        `fill="${e.fill}"`,
+        e.transform ? `transform="${e.transform}"` : "",
+        `data-layer="${e.layer}"`,
+        e.feature ? `data-feature="${e.feature}"` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `    <path ${attrs}/>`;
+    })
     .join("\n");
 }
 
-// For verification we output a flat SVG that renders identically to the
-// raw trace but with data-layer attributes showing each path's
-// classification. Nested <g> grouping would break the paint order.
+// Two flavors of the layered SVG:
+//   - traced-layered.svg       ALL paths including baked-in features
+//                              (useful as a faithful static portrait)
+//   - traced-layered-nofeat.svg  paths with data-feature set STRIPPED
+//                              so animated features can overlay cleanly
+const nofeat = paintOrder.filter((p) => !p.feature);
 const out = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TARGET} ${TARGET}" width="512" height="512">
-  <g id="glow-head-hair-beard-contour" ${transformAttr}>
+  <g id="silhouette" ${transformAttr}>
 ${renderPaths(paintOrder)}
   </g>
-  <g id="ear"></g>
-  <g id="glasses"></g>
-  <g id="brows"></g>
-  <g id="eyes"></g>
-  <g id="pupils"></g>
-  <g id="mouth"></g>
 </svg>`;
 fs.writeFileSync(OUT_SVG, out);
+
+const outNoFeat = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TARGET} ${TARGET}" width="512" height="512">
+  <g id="silhouette-no-features" ${transformAttr}>
+${renderPaths(nofeat)}
+  </g>
+</svg>`;
+fs.writeFileSync(OUT_SVG.replace(".svg", "-nofeat.svg"), outNoFeat);
 
 // ---------- Emit typed paths for the component -------------------------
 
@@ -339,10 +446,16 @@ function tsPaintOrder() {
       (e) =>
         `  { d: ${JSON.stringify(e.d)}, fill: ${JSON.stringify(e.fill)}, transform: ${JSON.stringify(
           e.transform ?? "",
-        )}, layer: ${JSON.stringify(e.layer)} }`,
+        )}, layer: ${JSON.stringify(e.layer)}, feature: ${JSON.stringify(e.feature ?? null)} }`,
     )
     .join(",\n");
-  return `export const TRACED_PAINT_ORDER: Array<{ d: string; fill: string; transform: string; layer: string }> = [
+  return `export const TRACED_PAINT_ORDER: Array<{
+  d: string;
+  fill: string;
+  transform: string;
+  layer: string;
+  feature: string | null;
+}> = [
 ${joined}
 ];`;
 }
@@ -354,20 +467,56 @@ export const TRACE_VIEWBOX = ${TARGET};
 export const TRACE_TRANSFORM = "matrix(${scale} 0 0 ${scale} ${tx} ${ty})";
 
 /**
+ * Anchor points (in the 256x256 target viewBox) measured from the traced
+ * feature paths. The animated overlay uses these so eyes / pupils /
+ * brows / mouth appear exactly where the traced portrait drew them.
+ */
+export const TRACED_ANCHORS = {
+  eyeL:  { cx: ${anchors.eyeL.cx}, cy: ${anchors.eyeL.cy} },
+  eyeR:  { cx: ${anchors.eyeR.cx}, cy: ${anchors.eyeR.cy} },
+  browL: { cx: ${anchors.browL.cx}, cy: ${anchors.browL.cy} },
+  browR: { cx: ${anchors.browR.cx}, cy: ${anchors.browR.cy} },
+  mouth: { cx: ${anchors.mouth.cx}, cy: ${anchors.mouth.cy} },
+} as const;
+
+/**
+ * Face-colored regions the animated overlay paints to erase the traced
+ * pupils / mouth / brows before drawing its own animated versions on top.
+ * All in 256x256 target space.
+ */
+export const TRACED_ERASE_REGIONS = {
+  lensL: { cx: ${eraseRegions.lensL.cx}, cy: ${eraseRegions.lensL.cy}, rx: ${eraseRegions.lensL.rx}, ry: ${eraseRegions.lensL.ry} },
+  lensR: { cx: ${eraseRegions.lensR.cx}, cy: ${eraseRegions.lensR.cy}, rx: ${eraseRegions.lensR.rx}, ry: ${eraseRegions.lensR.ry} },
+  mouth: { cx: ${eraseRegions.mouth.cx}, cy: ${eraseRegions.mouth.cy}, rx: ${eraseRegions.mouth.rx}, ry: ${eraseRegions.mouth.ry} },
+} as const;
+
+/**
  * All kept paths in ORIGINAL vtracer paint order. The hierarchical stacked
  * trace relies on this order (later paths painted on top of earlier ones),
- * so we preserve it verbatim. Each entry carries a \`layer\` hint so a
- * consumer can still tag paths as glow/face/contour/hair/beard while
- * rendering them in order.
+ * so we preserve it verbatim. Each entry carries:
+ *   - \`layer\`:   high-level group (glow / face / contour / hair / beard / other)
+ *   - \`feature\`: when non-null, the path is a baked-in animatable feature
+ *               (pupil / brow / mouth / soulPatch). Consumers that want to
+ *               animate the avatar should SKIP these paths and render the
+ *               animated overlay on top instead.
  */
 ${tsPaintOrder()}
 `;
 fs.writeFileSync(OUT_TS, ts);
 
-console.log(`[layer] kept ${Object.values(buckets).reduce((s, a) => s + a.length, 0)} paths`);
-for (const [k, v] of Object.entries(buckets)) {
-  console.log(`  ${k.padEnd(10)} ${v.length}`);
+const featureCounts = {};
+for (const p of paintOrder) {
+  const k = p.feature ?? "—";
+  featureCounts[k] = (featureCounts[k] ?? 0) + 1;
 }
+console.log(`[layer] kept ${paintOrder.length} paths (${nofeat.length} after feature-strip)`);
+for (const [k, v] of Object.entries(buckets)) {
+  console.log(`  layer=${k.padEnd(10)} ${v.length}`);
+}
+for (const [k, v] of Object.entries(featureCounts)) {
+  console.log(`  feature=${k.padEnd(10)} ${v}`);
+}
+console.log(`[layer] anchors (256-space):`, anchors);
 console.log(`[layer] visible bbox: (${visMinX},${visMinY})..(${visMaxX},${visMaxY})`);
 console.log(`[layer] transform: matrix(${scale.toFixed(3)} 0 0 ${scale.toFixed(3)} ${tx.toFixed(1)} ${ty.toFixed(1)})`);
 console.log(`[layer] wrote ${OUT_SVG}`);
