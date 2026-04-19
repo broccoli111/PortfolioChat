@@ -13,5 +13,10 @@ export type {
 export { EXPRESSION_PRESETS } from "./expressions";
 export type { ExpressionParams } from "./expressions";
 export { DEFAULT_PALETTE, resolvePalette } from "./palette";
-export { mapConversationToAvatarState } from "./mapping";
-export type { ConversationHint } from "./mapping";
+export { mapConversationToAvatarState, classifyMessage } from "./mapping";
+export type { ConversationHint, MessageClassification } from "./mapping";
+export { useSpeechSynthesis } from "./useSpeechSynthesis";
+export type {
+  SpeechSynthesisOptions,
+  UseSpeechSynthesisResult,
+} from "./useSpeechSynthesis";

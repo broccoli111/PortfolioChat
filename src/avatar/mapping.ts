@@ -60,3 +60,115 @@ function clampMaybe(v: number | undefined, min: number, max: number, fallback: n
   if (typeof v !== "number" || Number.isNaN(v)) return fallback;
   return v < min ? min : v > max ? max : v;
 }
+
+// ---------- Message classification --------------------------------------
+
+/**
+ * Result of inspecting a raw message. Feed into `mapConversationToAvatarState`
+ * or use directly with the component props.
+ */
+export type MessageClassification = {
+  emotion: AvatarEmotion;
+  intensity: number;
+  /** The raw keywords / signals that matched. Useful for debugging/logs. */
+  signals: string[];
+};
+
+/**
+ * Classify an arbitrary text message into an `AvatarEmotion` + intensity.
+ *
+ * Heuristics — deliberately simple and transparent so they're easy to
+ * extend:
+ *   - exclamation marks / multiple ! / ALL CAPS      => higher intensity
+ *   - question marks at the end                       => confused / thinking
+ *   - keywords like "think" / "hmm" / "maybe"         => thinking
+ *   - positive words ("yes", "great", "thanks", 😀)   => happy
+ *   - skeptical words ("really?", "sure?", "doubt")   => skeptical
+ *   - negative/unsure words ("idk", "hmm", "confus")  => confused / thinking
+ *   - short, soft statements                          => listening
+ *   - otherwise                                        => neutral
+ *
+ * The mapping is intentionally lightweight — it's meant to make short
+ * user messages feel alive, not to be a full sentiment model.
+ */
+export function classifyMessage(raw: string): MessageClassification {
+  const text = (raw ?? "").trim();
+  if (!text) {
+    return { emotion: "neutral", intensity: 1, signals: [] };
+  }
+  const lower = text.toLowerCase();
+  const signals: string[] = [];
+
+  // --- Intensity cues ---------------------------------------------------
+  let intensity = 0.8;
+  const bangs = (text.match(/!/g) || []).length;
+  if (bangs > 0) {
+    intensity = Math.min(1, 0.85 + bangs * 0.08);
+    signals.push(`bangs:${bangs}`);
+  }
+  // ALL CAPS with 3+ letters => shouting
+  const capsRatio =
+    text.replace(/[^A-Za-z]/g, "").length > 3
+      ? (text.match(/[A-Z]/g)?.length ?? 0) / Math.max(1, text.replace(/[^A-Za-z]/g, "").length)
+      : 0;
+  if (capsRatio > 0.6) {
+    intensity = Math.min(1, intensity + 0.15);
+    signals.push(`caps:${capsRatio.toFixed(2)}`);
+  }
+
+  // --- Emotion classification -------------------------------------------
+  // Order matters: more specific cues first.
+  const endsInQuestion = /\?\s*$/.test(text);
+  const multiQuestion = (text.match(/\?/g) || []).length >= 2;
+
+  // Happy cues — positive words, greetings, gratitude, celebratory
+  // punctuation, emoji
+  const happyRe =
+    /\b(yay|yes+|great|awesome|amazing|love|thanks?|thank you|ty|ty!|perfect|excellent|fantastic|brilliant|nice|cool|sweet|woo+|lets? go|lfg|hooray|congrats|celebrate|excited|hi|hi there|hey|hello|howdy|welcome)\b|[😀😃😄😁😆😊🙂🥳🎉✨👍💯❤️]/i;
+  // Sad / disappointed
+  const sadRe = /\b(sad|sorry|bummer|unfortunate|regret|disappointed)\b|[😢😞😔]/i;
+  // Skeptical cues
+  const skepticalRe =
+    /\b(really|seriously|sure(\?|,|$)|doubt|skeptic|unlikely|suspicious|prove|hmm really|come on|uh huh|right,|oh really)\b/i;
+  // Confused cues. (Don't include generic "wait" — it's too often a
+  // thinking / hold-on signal rather than confusion.)
+  const confusedRe =
+    /\b(what\??|huh|confus|lost|don'?t get|what do you mean|i don'?t understand|idk|no idea|puzzled|makes no sense|unsure)\b|\?\?+/i;
+  // Thinking cues
+  const thinkingRe =
+    /\b(hmm+|uhh+|umm+|let me think|thinking|pondering|considering|probably|maybe|perhaps|analyze|calculate|interesting|i wonder|pondering|working on|loading)\b/i;
+  // Listening cues — short, acknowledging statements
+  const listeningRe =
+    /\b(okay|ok|alright|got it|sure|mhm|uh huh|i see|listening|go on|go ahead|tell me|talk to me)\b/i;
+
+  let emotion: AvatarEmotion = "neutral";
+
+  if (happyRe.test(text)) {
+    emotion = "happy";
+    signals.push("happy");
+  } else if (sadRe.test(text)) {
+    // We don't have a dedicated sad preset — confused reads as
+    // uncertain/uneasy which is closer than neutral.
+    emotion = "confused";
+    signals.push("sad->confused");
+  } else if (skepticalRe.test(text)) {
+    emotion = "skeptical";
+    signals.push("skeptical");
+  } else if (confusedRe.test(text) || multiQuestion) {
+    emotion = "confused";
+    signals.push(multiQuestion ? "multi-question" : "confused-keyword");
+  } else if (thinkingRe.test(lower)) {
+    emotion = "thinking";
+    signals.push("thinking");
+  } else if (endsInQuestion) {
+    // A plain question usually means the speaker is posing a thought
+    // — thinking reads better than neutral.
+    emotion = "thinking";
+    signals.push("question-mark");
+  } else if (listeningRe.test(lower) && text.length <= 30) {
+    emotion = "listening";
+    signals.push("short-listening");
+  }
+
+  return { emotion, intensity, signals };
+}
