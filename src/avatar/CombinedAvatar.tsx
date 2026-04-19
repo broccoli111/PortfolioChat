@@ -360,7 +360,8 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
           <feOffset />
           <feGaussianBlur stdDeviation="12" />
           <feComposite in2="hardAlpha" operator="out" />
-          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.6 0 0 0 0 0 0 0 0 0.6 0" />
+          {/* Alpha multiplier in the last column is the glow opacity. */}
+          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.6 0 0 0 0 0 0 0 0 0.2 0" />
           <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow" />
           <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
         </filter>
