@@ -306,12 +306,19 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
   const browDR = browShapePath({ cx: bR.cx, cy: bR.cy, w: BROW_W }, effective.browAngleR, effective.browYR, false, 5);
 
   const mouthD = mouthPath(mouthShape, mouthOpen);
-  const mouthFillColor =
-    mouthShape === "open" || mouthShape === "mid"
-      ? colors.mouth
-      : mouthShape === "closed"
-      ? colors.ink
-      : "none";
+  // Mouth interior is pure black whenever the mouth is "open" (which is
+  // what the speaking cycle uses) so it reads cleanly while talking. For
+  // the mid shape (slight parting mid-word) we also use black so the
+  // transition through "closed -> mid -> open" stays consistent. Closed
+  // mouths at rest stay as the dark-brown ink color.
+  const isSpeakingOpen = render.speakShape !== null && (mouthShape === "open" || mouthShape === "mid");
+  const mouthFillColor = isSpeakingOpen
+    ? colors.black
+    : mouthShape === "open" || mouthShape === "mid"
+    ? colors.mouth
+    : mouthShape === "closed"
+    ? colors.ink
+    : "none";
 
   // geometry.mouthPath anchors at (124, 178); our source mouth sits at
   // the anchor measured above. Translate the animated mouth onto it.
