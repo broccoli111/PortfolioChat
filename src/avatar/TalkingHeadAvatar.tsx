@@ -18,7 +18,6 @@ import {
   earPath,
   hairHighlightPath,
   hairMainPath,
-  hairSpikesPath,
   headSilhouettePath,
   lensHighlightPath,
   mouthPath,
@@ -362,14 +361,12 @@ export function TalkingHeadAvatar(props: TalkingHeadAvatarProps) {
             bold shapes never poke outside the amber contour (except spikes,
             which we deliberately let protrude a little). */}
         <g clipPath="url(#avatar-face-clip)">
-          {/* 4. hair */}
+          {/* 4. hair — one continuous dark mass with a tufted top edge
+               baked into the main path, plus a single lighter highlight
+               block on the upper viewer-left side of the skull. */}
           <g>
             <path d={hairMainPath()} fill={colors.hairDark} />
-            {/* lighter side fade block on the near-side temple */}
             <path d={hairHighlightPath()} fill={colors.hairLight} opacity={0.9} />
-            {/* spiky/tufted top edge — small triangular tufts in the same
-                dark hair color */}
-            <path d={hairSpikesPath()} fill={colors.hairDark} />
           </g>
 
           {/* 5. beard — chin-strap style (clean mustache zone) */}

@@ -33,30 +33,32 @@ export const VIEWBOX = 256;
  */
 export const GEOMETRY = {
   /** Head silhouette center (informational — path authored below). */
-  head: { cx: 128, cy: 136 },
+  head: { cx: 126, cy: 136 },
 
   /** Far-side ear (viewer-right). Small, with an inner whorl. */
-  ear: { cx: 210, cy: 146, rx: 10, ry: 16 },
-
-  /** Eyes — nearly symmetric, sized to fit inside the glasses lenses. */
-  eyeL: { cx: 100, cy: 130, rx: 16, ry: 17 },
-  eyeR: { cx: 156, cy: 130, rx: 16, ry: 17 },
+  ear: { cx: 206, cy: 146, rx: 10, ry: 16 },
 
   /**
-   * Glasses lenses — rounded rectangles, nearly symmetric. Slightly taller
-   * than they are wide for the rectangular amber look.
+   * Eyes — centered inside the glass lenses. Their rx/ry cap the lens
+   * interior so the pupils never clip.
    */
-  glassL: { x: 78, y: 108, w: 46, h: 46, r: 12 },
-  glassR: { x: 132, y: 108, w: 46, h: 46, r: 12 },
+  eyeL: { cx: 91, cy: 134, rx: 18, ry: 17 },
+  eyeR: { cx: 155, cy: 134, rx: 18, ry: 17 },
+
+  /**
+   * Glasses lenses — nearly symmetric rounded rectangles, sized so the
+   * pair spans ~70% of the head width.
+   */
+  glassL: { x: 64, y: 110, w: 54, h: 48, r: 12 },
+  glassR: { x: 128, y: 110, w: 54, h: 48, r: 12 },
   glassBridgeY: 128,
 
-  /** Brows — kept mostly hidden behind the hair/glasses but available for
-   *  expression. Small anchors just below the hairline. */
-  browL: { cx: 100, cy: 100, w: 30 },
-  browR: { cx: 156, cy: 100, w: 30 },
+  /** Brows — thick rounded bars sitting clearly above the lenses. */
+  browL: { cx: 91, cy: 100, w: 34 },
+  browR: { cx: 155, cy: 100, w: 34 },
 
   /** Mouth anchor — sits in the skin window framed by the beard band. */
-  mouth: { cx: 128, cy: 178, w: 26 },
+  mouth: { cx: 124, cy: 178, w: 24 },
 } as const;
 
 // ---------- Head silhouette ---------------------------------------------
@@ -68,23 +70,21 @@ export const GEOMETRY = {
  */
 export function headSilhouettePath(): string {
   return [
-    "M 128 44",
+    "M 126 40",
     // Top-right of skull -> far-side temple
-    "C 160 42, 188 52, 200 78",
+    "C 162 38, 190 48, 202 72",
     // Far-side temple -> cheekbone bulge (the ear attaches here)
-    "C 208 100, 210 124, 206 150",
+    "C 212 100, 214 136, 208 168",
     // Cheekbone -> far-side jaw (rounded, not angular)
-    "C 202 180, 186 204, 160 216",
+    "C 202 196, 188 220, 160 232",
     // Far-side jaw -> chin
-    "C 146 222, 134 224, 124 224",
+    "C 144 236, 110 236, 92 230",
     // Chin -> near-side jaw
-    "C 112 224, 98 220, 82 212",
+    "C 68 222, 50 202, 44 174",
     // Near-side jaw -> near-side cheekbone
-    "C 60 196, 48 172, 46 148",
+    "C 40 144, 42 108, 52 82",
     // Near-side cheekbone -> near-side temple
-    "C 44 120, 52 92, 68 72",
-    // Near-side temple back across the top
-    "C 84 52, 106 44, 128 44",
+    "C 64 56, 92 42, 126 40",
     "Z",
   ].join(" ");
 }
@@ -97,28 +97,22 @@ export function headSilhouettePath(): string {
  * sideburns that meet the beard.
  */
 export function hairMainPath(): string {
-  // Single continuous mass covering the top of the skull and wrapping down
-  // both temples to the sideburn attach points. The forehead hairline is
-  // GENTLE — a very shallow dip so there's no visible skin hole under the
-  // spikes, and the hair meets the beard sideburns cleanly at y~140.
+  // Main hair mass. Textured top edge is baked directly into the path so
+  // the whole hair silhouette is one shape (cleaner than a separate
+  // spikes overlay and still faithful to the buzz-cut-with-texture look).
   return [
-    // Near-side sideburn tip (meets the beard)
-    "M 48 144",
-    // Up the near-side temple
-    "C 44 114, 52 82, 68 66",
-    // Across the top of the skull
-    "C 92 48, 164 48, 188 66",
+    "M 50 108",
+    // Up the near-side temple, then across the top with tufted peaks
+    "C 44 82, 54 58, 72 48",
+    "L 78 44 L 86 50 L 94 42 L 104 50 L 114 42 L 124 50 L 134 42 L 146 50 L 156 42 L 166 50 L 176 44 L 184 52",
     // Down the far-side temple
-    "C 204 82, 212 114, 208 144",
-    // Far-side sideburn tip (meets the beard)
-    "C 204 146, 200 146, 196 144",
-    // Hairline inside the forehead — a single smooth shallow arc from
-    // far-side temple to near-side temple with just a whisper of a
-    // widow's-peak at the center.
-    "C 196 108, 178 94, 128 98",
-    "C 78 94, 60 108, 60 144",
-    // Close back to near-side sideburn
-    "C 56 146, 52 146, 48 144",
+    "C 204 62, 214 88, 210 114",
+    // Back along the inner hairline
+    "C 204 116, 196 118, 188 114",
+    "C 182 96, 162 88, 140 88",
+    "C 120 88, 102 92, 90 102",
+    "C 80 108, 68 110, 60 108",
+    "C 56 108, 52 108, 50 108",
     "Z",
   ].join(" ");
 }
@@ -130,28 +124,10 @@ export function hairMainPath(): string {
  * main hair shape so it protrudes past the smooth upper contour.
  */
 export function hairSpikesPath(): string {
-  // Subtle row of small tufts across the top of the skull. Peaks rise only
-  // 4-6 units above the smooth hairline to suggest "short textured cut"
-  // rather than spiky anime hair.
-  const peaks: Array<[number, number]> = [
-    [74, 66],
-    [80, 58],
-    [88, 62],
-    [96, 56],
-    [106, 60],
-    [116, 54],
-    [126, 58],
-    [136, 52],
-    [146, 56],
-    [156, 54],
-    [166, 60],
-    [176, 58],
-    [186, 64],
-  ];
-  const left = "M 70 72";
-  const right = "L 190 72";
-  const line = peaks.map(([x, y]) => `L ${x} ${y}`).join(" ");
-  return [left, line, right, "L 190 80", "L 70 80", "Z"].join(" ");
+  // No longer used — the tufted top edge is now baked into hairMainPath.
+  // Returned as an empty path so any callers still referencing it render
+  // nothing instead of erroring.
+  return "M 0 0 Z";
 }
 
 /**
@@ -161,14 +137,13 @@ export function hairSpikesPath(): string {
  */
 export function hairHighlightPath(): string {
   return [
-    // Top at the near-side temple
-    "M 56 80",
-    "C 52 104, 52 126, 58 140",
-    // Bottom curves around the near-side sideburn
-    "C 62 140, 66 138, 70 134",
-    // Inner edge back up into the skull
-    "C 68 114, 70 96, 78 80",
-    "C 72 78, 62 78, 56 80",
+    // Compact lighter block on the upper viewer-left side of the skull,
+    // tight to the scalp. Matches the reference's single highlight region.
+    "M 58 66",
+    "C 70 56, 86 52, 102 58",
+    "C 100 70, 92 84, 78 92",
+    "C 70 90, 62 82, 58 74",
+    "C 58 70, 58 68, 58 66",
     "Z",
   ].join(" ");
 }
@@ -190,18 +165,17 @@ export function beardPath(): string {
   // "window" framing the mouth and upper chin.
   return [
     // --- Outer edge: near-side sideburn down, under chin, up far side ---
-    "M 48 142",
-    "C 50 172, 66 206, 90 218",
-    "C 110 226, 146 226, 166 218",
-    "C 190 206, 206 172, 208 142",
+    "M 48 146",
+    "C 50 178, 64 208, 88 222",
+    "C 108 230, 146 230, 164 222",
+    "C 190 208, 204 178, 206 146",
     // Far-side sideburn meets inner edge
-    "C 206 150, 202 154, 200 158",
-    // --- Inner edge: a single smooth arc from far-side sideburn across
-    //    to near-side sideburn. Dips down in the center to make the skin
-    //    window for the mouth. ---
-    "C 190 178, 160 196, 128 196",
-    "C 96 196, 66 178, 56 158",
-    "C 54 154, 50 150, 48 142",
+    "C 202 152, 198 156, 196 156",
+    // --- Inner edge: smooth arc across the mid-face with a soft central
+    //    dip so the mouth reads on skin, not on beard.
+    "C 190 180, 168 198, 124 198",
+    "C 88 198, 64 178, 58 156",
+    "C 54 156, 50 152, 48 146",
     "Z",
   ].join(" ");
 }
