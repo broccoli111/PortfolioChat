@@ -23,11 +23,3 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tracing pipeline intermediates — regenerable from reference/avatar.png
-reference/avatar-clean.png
-reference/compare.png
-reference/layered-preview.png
-reference/raw-preview.png
-reference/anchor-preview.png
-reference/side-by-side.png
-reference/traced-raw.svg
