@@ -33,7 +33,6 @@ import {
   ORIGINAL_BACKDROP,
   ORIGINAL_COLORS,
   ORIGINAL_ERASERS,
-  ORIGINAL_GLOW_FILTER_ID,
   ORIGINAL_VIEWBOX,
 } from "./originalArtwork";
 import { resolvePalette } from "./palette";
@@ -338,36 +337,9 @@ export function CombinedAvatar(props: CombinedAvatarProps) {
       className={className}
       style={{ display: "block", background: colors.background, overflow: "visible" }}
     >
-      <defs>
-        {/* Figma drop-shadow filter: transparent blur -> amber orange.
-             Applied to the whole avatar <g> so the glow hugs the silhouette. */}
-        <filter
-          id={ORIGINAL_GLOW_FILTER_ID}
-          x="-24"
-          y="-24"
-          width="304"
-          height="304"
-          filterUnits="userSpaceOnUse"
-          colorInterpolationFilters="sRGB"
-        >
-          <feFlood floodOpacity="0" result="BackgroundImageFix" />
-          <feColorMatrix
-            in="SourceAlpha"
-            type="matrix"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-            result="hardAlpha"
-          />
-          <feOffset />
-          <feGaussianBlur stdDeviation="12" />
-          <feComposite in2="hardAlpha" operator="out" />
-          {/* Alpha multiplier in the last column is the glow opacity. */}
-          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.6 0 0 0 0 0 0 0 0 0.2 0" />
-          <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow" />
-          <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
-        </filter>
-      </defs>
-
-      <g filter={`url(#${ORIGINAL_GLOW_FILTER_ID})`} transform={`translate(0 ${render.bob.toFixed(3)})`}>
+      {/* Glow filter removed — re-add a <filter> + filter=url(...) on the
+           group below if you want to restore the amber drop-shadow. */}
+      <g transform={`translate(0 ${render.bob.toFixed(3)})`}>
         {/* ---- 1. Source artwork backdrop ---- */}
         {/* face fill (no stroke) */}
         <path d={B.faceFill} fill={colors.skin} />

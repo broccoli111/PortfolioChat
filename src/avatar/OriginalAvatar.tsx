@@ -9,7 +9,6 @@ import {
   ORIGINAL_BACKDROP,
   ORIGINAL_COLORS,
   ORIGINAL_FEATURES,
-  ORIGINAL_GLOW_FILTER_ID,
   ORIGINAL_VIEWBOX,
 } from "./originalArtwork";
 
@@ -35,33 +34,9 @@ export function OriginalAvatar({ size = 256, className, ariaLabel = "Avatar" }: 
       className={className}
       style={{ display: "block", overflow: "visible" }}
     >
-      <defs>
-        <filter
-          id={ORIGINAL_GLOW_FILTER_ID + "-static"}
-          x="-24"
-          y="-24"
-          width="304"
-          height="304"
-          filterUnits="userSpaceOnUse"
-          colorInterpolationFilters="sRGB"
-        >
-          <feFlood floodOpacity="0" result="BackgroundImageFix" />
-          <feColorMatrix
-            in="SourceAlpha"
-            type="matrix"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-            result="hardAlpha"
-          />
-          <feOffset />
-          <feGaussianBlur stdDeviation="12" />
-          <feComposite in2="hardAlpha" operator="out" />
-          <feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.6 0 0 0 0 0 0 0 0 0.2 0" />
-          <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow" />
-          <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
-        </filter>
-      </defs>
-
-      <g filter={`url(#${ORIGINAL_GLOW_FILTER_ID}-static)`}>
+      {/* Glow filter removed — see originalArtwork.ts for the Figma
+          drop-shadow definition if you want to restore it. */}
+      <g>
         <path d={B.faceFill} fill={C.skin} />
         <path d={B.faceOutline} fill={C.skin} stroke={C.ink} strokeWidth={6} strokeLinecap="round" />
         <path d={B.hair} fill={C.ink} />
